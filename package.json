@@ -1,0 +1,40 @@
+{
+  "name": "botzin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local TypeScript architecture for Tibia screen perception through OBS preview and optional Raspberry Pi HID execution.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "config:dev": "tsx src/web/config-server.ts",
+    "dev": "tsx src/index.ts",
+    "migrate": "tsx src/database/migrate.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:studio": "prisma studio",
+    "user:create-admin": "tsx src/database/create-admin-user.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "@types/busboy": "^1.5.4",
+    "@types/jsonwebtoken": "^9.0.10",
+    "bcryptjs": "^3.0.3",
+    "busboy": "^1.6.0",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.14.0",
+    "obs-websocket-js": "^5.0.8",
+    "onnxruntime-node": "^1.26.0",
+    "prisma": "^6.19.3",
+    "sharp": "^0.35.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

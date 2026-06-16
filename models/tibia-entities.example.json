@@ -1,0 +1,6 @@
+[
+  { "id": 0, "kind": "player", "label": "player" },
+  { "id": 1, "kind": "creature", "label": "creature" },
+  { "id": 2, "kind": "npc", "label": "npc" },
+  { "id": 3, "kind": "player-summon", "label": "player-summon" }
+]

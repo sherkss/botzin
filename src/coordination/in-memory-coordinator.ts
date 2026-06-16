@@ -1,0 +1,24 @@
+import { randomUUID } from "node:crypto";
+import type { PerceptionResult } from "../perception/perception-pipeline.js";
+import type { PerceptionEvent } from "./perception-event.js";
+
+export class InMemoryCoordinator {
+  private readonly events: PerceptionEvent[] = [];
+
+  ingest(result: PerceptionResult): PerceptionEvent {
+    const event: PerceptionEvent = {
+      id: randomUUID(),
+      sourceComputerId: result.sourceComputerId,
+      receivedAt: new Date().toISOString(),
+      capturedAt: result.capturedAt,
+      entities: result.entities
+    };
+
+    this.events.push(event);
+    return event;
+  }
+
+  listLatest(limit = 20): readonly PerceptionEvent[] {
+    return this.events.slice(-limit);
+  }
+}
