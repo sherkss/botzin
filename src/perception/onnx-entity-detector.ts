@@ -21,6 +21,16 @@ interface Candidate {
   readonly box: BoundingBox;
 }
 
+/**
+ * Maps model-input pixel coordinates back to the original frame. `scale` is the
+ * uniform resize factor and `padX`/`padY` are the letterbox borders (in model pixels).
+ */
+interface LetterboxTransform {
+  readonly scale: number;
+  readonly padX: number;
+  readonly padY: number;
+}
+
 export class OnnxEntityDetector implements EntityDetector {
   readonly name = "onnx-local-vision";
   private sessionPromise: Promise<ort.InferenceSession> | null = null;
@@ -30,7 +40,7 @@ export class OnnxEntityDetector implements EntityDetector {
 
   async detect(frame: ScreenFrame): Promise<readonly GameEntity[]> {
     const [session, labels] = await Promise.all([this.getSession(), this.getLabels()]);
-    const input = await this.prepareInput(frame);
+    const { tensor: input, transform } = await this.prepareInput(frame);
     const inputName = session.inputNames[0];
     const output = await session.run({ [inputName]: input });
     const outputTensor = output[session.outputNames[0]];
@@ -39,7 +49,7 @@ export class OnnxEntityDetector implements EntityDetector {
       throw new Error("ONNX model did not return an output tensor.");
     }
 
-    return this.parseDetections(outputTensor, labels, frame).map((candidate) => ({
+    return this.parseDetections(outputTensor, labels, frame, transform).map((candidate) => ({
       id: randomUUID(),
       kind: candidate.kind,
       confidence: candidate.confidence,
@@ -77,9 +87,27 @@ export class OnnxEntityDetector implements EntityDetector {
     return parsed;
   }
 
-  private async prepareInput(frame: ScreenFrame): Promise<ort.Tensor> {
+  private async prepareInput(frame: ScreenFrame): Promise<{ tensor: ort.Tensor; transform: LetterboxTransform }> {
+    const modelWidth = this.config.onnxInputWidth;
+    const modelHeight = this.config.onnxInputHeight;
+
+    // Letterbox: preserve aspect ratio and pad to the model size, matching how YOLO
+    // models are typically trained. Stretching ("fill") distorts geometry and accuracy.
+    const scale = Math.min(modelWidth / frame.width, modelHeight / frame.height);
+    const resizedWidth = Math.round(frame.width * scale);
+    const resizedHeight = Math.round(frame.height * scale);
+    const padX = Math.floor((modelWidth - resizedWidth) / 2);
+    const padY = Math.floor((modelHeight - resizedHeight) / 2);
+
     const { data, info } = await sharp(frame.data)
-      .resize(this.config.onnxInputWidth, this.config.onnxInputHeight, { fit: "fill" })
+      .resize(resizedWidth, resizedHeight, { fit: "fill" })
+      .extend({
+        top: padY,
+        bottom: modelHeight - resizedHeight - padY,
+        left: padX,
+        right: modelWidth - resizedWidth - padX,
+        background: { r: 114, g: 114, b: 114 }
+      })
       .removeAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
@@ -93,26 +121,35 @@ export class OnnxEntityDetector implements EntityDetector {
       input[index + planeSize * 2] = data[index * channels + 2] / 255;
     }
 
-    return new ort.Tensor("float32", input, [1, 3, info.height, info.width]);
+    return {
+      tensor: new ort.Tensor("float32", input, [1, 3, info.height, info.width]),
+      transform: { scale, padX, padY }
+    };
   }
 
   private parseDetections(
     tensor: ort.Tensor,
     labels: readonly ModelLabel[],
-    frame: ScreenFrame
+    frame: ScreenFrame,
+    transform: LetterboxTransform
   ): readonly Candidate[] {
     const data = tensor.data as Float32Array;
     const dims = tensor.dims;
     const rows = normalizeRows(data, dims, labels.length);
     const candidates = rows
-      .map((row) => this.rowToCandidate(row, labels, frame))
+      .map((row) => this.rowToCandidate(row, labels, frame, transform))
       .filter((candidate): candidate is Candidate => candidate !== null)
       .sort((left, right) => right.confidence - left.confidence);
 
     return nonMaxSuppression(candidates, this.config.detectionIou);
   }
 
-  private rowToCandidate(row: readonly number[], labels: readonly ModelLabel[], frame: ScreenFrame): Candidate | null {
+  private rowToCandidate(
+    row: readonly number[],
+    labels: readonly ModelLabel[],
+    frame: ScreenFrame,
+    transform: LetterboxTransform
+  ): Candidate | null {
     const hasObjectness = row.length >= labels.length + 5;
     const classOffset = hasObjectness ? 5 : 4;
     const classScores = row.slice(classOffset, classOffset + labels.length);
@@ -143,7 +180,16 @@ export class OnnxEntityDetector implements EntityDetector {
       kind: label.kind,
       label: label.label,
       confidence,
-      box: scaleBoxFromModel(row[0], row[1], row[2], row[3], frame, this.config.onnxInputWidth, this.config.onnxInputHeight)
+      box: mapBoxFromModel(
+        row[0],
+        row[1],
+        row[2],
+        row[3],
+        frame,
+        transform,
+        this.config.onnxInputWidth,
+        this.config.onnxInputHeight
+      )
     };
   }
 }
@@ -180,28 +226,37 @@ function normalizeRows(data: Float32Array, dims: readonly number[], labelCount: 
   throw new Error(`Unsupported ONNX output shape: [${dims.join(", ")}].`);
 }
 
-function scaleBoxFromModel(
+function mapBoxFromModel(
   centerX: number,
   centerY: number,
   width: number,
   height: number,
   frame: ScreenFrame,
+  transform: LetterboxTransform,
   modelWidth: number,
   modelHeight: number
 ): BoundingBox {
+  // Some exports emit normalized coordinates in [0, 1]; convert them to model pixels first.
   const normalized = centerX <= 1 && centerY <= 1 && width <= 1 && height <= 1;
-  const sourceWidth = normalized ? 1 : modelWidth;
-  const sourceHeight = normalized ? 1 : modelHeight;
-  const scaleX = frame.width / sourceWidth;
-  const scaleY = frame.height / sourceHeight;
-  const x = (centerX - width / 2) * scaleX;
-  const y = (centerY - height / 2) * scaleY;
+  const modelCenterX = normalized ? centerX * modelWidth : centerX;
+  const modelCenterY = normalized ? centerY * modelHeight : centerY;
+  const modelW = normalized ? width * modelWidth : width;
+  const modelH = normalized ? height * modelHeight : height;
+
+  // Undo the letterbox: remove padding, then divide by the resize scale.
+  const x = (modelCenterX - modelW / 2 - transform.padX) / transform.scale;
+  const y = (modelCenterY - modelH / 2 - transform.padY) / transform.scale;
+  const boxWidth = modelW / transform.scale;
+  const boxHeight = modelH / transform.scale;
+
+  const clampedX = clamp(Math.round(x), 0, frame.width);
+  const clampedY = clamp(Math.round(y), 0, frame.height);
 
   return {
-    x: clamp(Math.round(x), 0, frame.width),
-    y: clamp(Math.round(y), 0, frame.height),
-    width: clamp(Math.round(width * scaleX), 0, frame.width),
-    height: clamp(Math.round(height * scaleY), 0, frame.height)
+    x: clampedX,
+    y: clampedY,
+    width: clamp(Math.round(boxWidth), 0, frame.width - clampedX),
+    height: clamp(Math.round(boxHeight), 0, frame.height - clampedY)
   };
 }
 

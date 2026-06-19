@@ -1,0 +1,6 @@
+# Normalize line endings: let Git decide text vs binary automatically,
+# but force LF on shell scripts so they don't get CRLF on Windows and
+# break /bin/sh on Linux/CI with the ^M error.
+* text=auto
+*.sh text eol=lf
+.githooks/* text eol=lf

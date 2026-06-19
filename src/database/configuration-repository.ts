@@ -1,4 +1,5 @@
 import type { Pool, ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import { ValidationError } from "../core/errors.js";
 import type {
   BotAccount,
   BotCharacter,
@@ -161,10 +162,10 @@ export class ConfigurationRepository {
         nullableString(input.spellWords),
         nullableString(input.hotkey),
         stringValue(input.category, "attack"),
-        numberValue(input.manaCost, 0),
-        numberValue(input.requiredLevel, 0),
+        nonNegativeNumber(input.manaCost, 0, "manaCost"),
+        nonNegativeNumber(input.requiredLevel, 0, "requiredLevel"),
         requiredString(input.allowedVocations, "allowedVocations"),
-        numberValue(input.cooldownMs, 1000),
+        nonNegativeNumber(input.cooldownMs, 1000, "cooldownMs"),
         nullableString(input.notes),
         booleanValue(input.enabled, true)
       ]
@@ -208,10 +209,10 @@ export class ConfigurationRepository {
         requiredNumber(input.huntId, "huntId"),
         requiredNumber(input.skillId, "skillId"),
         numberValue(input.priority, 100),
-        nullableNumber(input.minManaPercent),
-        nullableNumber(input.maxManaPercent),
-        nullableNumber(input.minHpPercent),
-        nullableNumber(input.maxHpPercent),
+        nullablePercent(input.minManaPercent, "minManaPercent"),
+        nullablePercent(input.maxManaPercent, "maxManaPercent"),
+        nullablePercent(input.minHpPercent, "minHpPercent"),
+        nullablePercent(input.maxHpPercent, "maxHpPercent"),
         nullableNumber(input.minCreatures),
         nullableNumber(input.maxCreatures),
         booleanValue(input.enabled, true),
@@ -565,7 +566,7 @@ function mapSingle<T>(rows: RowDataPacket[], mapper: (row: RowDataPacket) => T):
 function requiredString(value: unknown, field: string): string {
   const parsed = stringValue(value, "");
   if (!parsed) {
-    throw new Error(`Field "${field}" is required.`);
+    throw new ValidationError(`Field "${field}" is required.`);
   }
   return parsed;
 }
@@ -581,7 +582,7 @@ function nullableString(value: unknown): string | null {
 function requiredNumber(value: unknown, field: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`Field "${field}" is required.`);
+    throw new ValidationError(`Field "${field}" is required.`);
   }
   return parsed;
 }
@@ -589,6 +590,32 @@ function requiredNumber(value: unknown, field: string): number {
 function numberValue(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/** Non-negative number with a fallback. Rejects NaN and negative values. */
+function nonNegativeNumber(value: unknown, fallback: number, field: string): number {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new ValidationError(`Field "${field}" must be a non-negative number.`);
+  }
+  return parsed;
+}
+
+/** Optional percentage constrained to [0, 100]. */
+function nullablePercent(value: unknown, field: string): number | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+    throw new ValidationError(`Field "${field}" must be between 0 and 100.`);
+  }
+  return parsed;
 }
 
 function nullableNumber(value: unknown): number | null {
@@ -605,7 +632,11 @@ function jsonString(value: unknown): string {
     return "null";
   }
 
-  JSON.parse(value);
+  try {
+    JSON.parse(value);
+  } catch {
+    throw new ValidationError("Field must contain valid JSON.");
+  }
   return value;
 }
 

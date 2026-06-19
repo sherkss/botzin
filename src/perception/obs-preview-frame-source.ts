@@ -9,8 +9,17 @@ export class ObsPreviewFrameSource implements FrameSource {
   readonly name = "obs-preview";
   private readonly obs = new OBSWebSocket();
   private connected = false;
+  private connecting: Promise<void> | null = null;
 
-  constructor(private readonly config: RuntimeConfig) {}
+  constructor(private readonly config: RuntimeConfig) {
+    // When OBS drops or errors, mark ourselves disconnected so the next capture reconnects.
+    this.obs.on("ConnectionClosed", () => {
+      this.connected = false;
+    });
+    this.obs.on("ConnectionError", () => {
+      this.connected = false;
+    });
+  }
 
   async captureFrame(): Promise<ScreenFrame> {
     await this.connect();
@@ -40,6 +49,17 @@ export class ObsPreviewFrameSource implements FrameSource {
       return;
     }
 
+    // Coalesce concurrent captures so only a single handshake is in flight at a time.
+    this.connecting ??= this.openConnection();
+
+    try {
+      await this.connecting;
+    } finally {
+      this.connecting = null;
+    }
+  }
+
+  private async openConnection(): Promise<void> {
     await this.obs.connect(this.config.obsWebSocketUrl, this.config.obsWebSocketPassword || undefined);
     this.connected = true;
   }

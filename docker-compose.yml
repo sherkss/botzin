@@ -1,0 +1,70 @@
+services:
+
+  # ── Banco de dados ─────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.4
+    container_name: botzin-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: botzin
+      MYSQL_USER: botzin
+      MYSQL_PASSWORD: botzin
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/01-databases.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
+      - ./docker/02-schema.sh:/docker-entrypoint-initdb.d/02-schema.sh:ro
+      - ./database/schema.sql:/docker-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "botzin", "-pbotzin"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # ── Painel de configuração (web) ───────────────────────────────────────────
+  #
+  # No primeiro start: aplica o schema SQL + cria o usuário admin automaticamente.
+  # Depois disso: acesse http://localhost:4580 e faça login com as credenciais abaixo.
+  #
+  # Para trocar a senha do admin, altere BOTZIN_ADMIN_PASSWORD e reinicie:
+  #   docker compose restart app
+  app:
+    build: .
+    container_name: botzin-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      # ── MySQL (sempre aponta para o container mysql) ──
+      BOTZIN_MYSQL_HOST: mysql
+      BOTZIN_MYSQL_PORT: "3306"
+      BOTZIN_MYSQL_USER: botzin
+      BOTZIN_MYSQL_PASSWORD: botzin
+      BOTZIN_MYSQL_DATABASE: botzin
+      DATABASE_URL: mysql://botzin:botzin@mysql:3306/botzin
+
+      # ── Web ──
+      # 0.0.0.0 é obrigatório dentro do container para a porta ser acessível do host.
+      BOTZIN_WEB_HOST: "0.0.0.0"
+      BOTZIN_WEB_PORT: "4580"
+
+      # ── Segredos — troque antes de colocar em produção ──
+      BOTZIN_JWT_SECRET: troque-isso-por-um-segredo-longo-e-aleatorio
+      BOTZIN_JWT_EXPIRES_IN_SECONDS: "28800"
+
+      # ── Admin criado automaticamente no primeiro start ──
+      BOTZIN_ADMIN_USERNAME: admin
+      BOTZIN_ADMIN_PASSWORD: admin123
+      BOTZIN_ADMIN_DISPLAY_NAME: Administrador
+    ports:
+      - "4580:4580"
+    volumes:
+      - storage_data:/app/storage
+
+volumes:
+  mysql_data:
+  storage_data:

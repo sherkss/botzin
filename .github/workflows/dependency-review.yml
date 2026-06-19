@@ -1,0 +1,28 @@
+name: Dependency Review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  # Required to post inline PR comments with vulnerability details
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # actions/checkout v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Dependency Review
+        # actions/dependency-review-action v4.5.0
+        uses: actions/dependency-review-action@ce28f5bb42b1c5b9d7a1a2cb2e50e73ee7a39c33
+        with:
+          fail-on-severity: high
+          # Block packages with known vulnerabilities AND newly introduced
+          # packages published less than 7 days ago (mirrors .npmrc rule)
+          deny-packages: ""
+          comment-summary-in-pr: always

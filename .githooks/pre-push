@@ -1,0 +1,20 @@
+#!/bin/sh
+# pre-push hook — supply-chain guard before code reaches the remote.
+# Activated via: git config core.hooksPath .githooks
+
+set -e
+
+echo "[pre-push] Linting lockfile..."
+npx lockfile-lint \
+  --path package-lock.json \
+  --type npm \
+  --validate-https \
+  --validate-integrity \
+  --allowed-hosts npm
+# ^^^ BLOCKING: push is aborted if the lockfile has non-https or unsigned entries.
+
+echo "[pre-push] Running npm audit (informational)..."
+# Not blocking — a fresh CVE shouldn't block a hotfix push. Fix it in a follow-up.
+npm audit --audit-level=high || true
+
+echo "[pre-push] All pre-push checks passed."
