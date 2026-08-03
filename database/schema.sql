@@ -136,6 +136,39 @@ CREATE TABLE IF NOT EXISTS bot_hunt_skill_rules (
     ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS bot_hunt_telemetry (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  character_id BIGINT UNSIGNED NOT NULL,
+  hunt_id BIGINT UNSIGNED NOT NULL,
+  assignment_id BIGINT UNSIGNED NULL,
+  captured_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  duration_seconds INT UNSIGNED NULL,
+  xp_rate_percent INT UNSIGNED NOT NULL DEFAULT 150,
+  xp_gain BIGINT NULL,
+  raw_xp_gain BIGINT NULL,
+  xp_per_hour BIGINT NULL,
+  raw_xp_per_hour BIGINT NULL,
+  loot_value BIGINT NULL,
+  supplies_value BIGINT NULL,
+  profit BIGINT NULL,
+  creatures_json JSON NULL,
+  raw_text MEDIUMTEXT NULL,
+  source ENUM('session-analyser', 'ocr', 'manual', 'telemetry') NOT NULL DEFAULT 'session-analyser',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_bot_hunt_telemetry_character_time (character_id, captured_at),
+  KEY idx_bot_hunt_telemetry_hunt_time (hunt_id, captured_at),
+  CONSTRAINT fk_bot_hunt_telemetry_character
+    FOREIGN KEY (character_id) REFERENCES bot_characters (id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_bot_hunt_telemetry_hunt
+    FOREIGN KEY (hunt_id) REFERENCES bot_hunts (id)
+    ON DELETE RESTRICT,
+  CONSTRAINT fk_bot_hunt_telemetry_assignment
+    FOREIGN KEY (assignment_id) REFERENCES bot_hunt_assignments (id)
+    ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS bot_learning_methods (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   name VARCHAR(140) NOT NULL,

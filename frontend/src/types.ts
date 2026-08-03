@@ -56,6 +56,25 @@ export interface HuntSkillRule {
   priority?: number;
 }
 
+export interface HuntTelemetry {
+  id: number;
+  characterId: number;
+  huntId: number;
+  assignmentId: number | null;
+  capturedAt: string;
+  durationSeconds: number | null;
+  xpRatePercent: number;
+  xpGain: number | null;
+  rawXpGain: number | null;
+  xpPerHour: number | null;
+  rawXpPerHour: number | null;
+  lootValue: number | null;
+  suppliesValue: number | null;
+  profit: number | null;
+  creaturesJson: string | null;
+  source: string;
+}
+
 export interface LearningMethod {
   id: number;
   name: string;
@@ -101,6 +120,52 @@ export interface DecisionFeedback {
   rating: "good" | "bad" | "unsafe" | "unknown";
 }
 
+export interface KnowledgeCoverage {
+  indexedDocuments: number;
+  indexedChunks: number;
+  reviewedDocuments: number;
+  generatedAt: string | null;
+}
+
+export interface KnowledgeSearchResult {
+  id: string;
+  videoId: string;
+  title: string;
+  url: string;
+  startSeconds: number;
+  endSeconds: number;
+  text: string;
+  reviewed: boolean;
+  score: number;
+}
+
+export interface LiveDecisionRecord {
+  id: string;
+  observedAt: string;
+  sourceComputerId: string;
+  strategy: string;
+  mode: "observe" | "suggest";
+  status: "observed" | "suggested" | "error";
+  decision: string;
+  reasons: string[];
+  perceptionConfidence: number | null;
+  entityCounts: {
+    player: number;
+    creature: number;
+    npc: number;
+    "player-summon": number;
+    unknown: number;
+  };
+  commands: Array<{ id: string; type: string }>;
+  error: string | null;
+}
+
+export interface LiveDecisionSnapshot {
+  active: boolean;
+  lastSeenAt: string | null;
+  records: LiveDecisionRecord[];
+}
+
 export interface AppState {
   accounts: Account[];
   characters: Character[];
@@ -109,6 +174,7 @@ export interface AppState {
   skills: Skill[];
   assignments: Assignment[];
   huntSkillRules: HuntSkillRule[];
+  huntTelemetry: HuntTelemetry[];
   learningMethods: LearningMethod[];
   learningSources: LearningSource[];
   learningMethodSources: LearningMethodSource[];

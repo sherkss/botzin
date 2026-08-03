@@ -14,7 +14,7 @@ describe("GET /api/config", () => {
     expect(res.status).toBe(200);
   });
 
-  it("returns all 13 top-level collections when DB is empty", async () => {
+  it("returns all top-level collections when DB is empty", async () => {
     const token = await loginAsAdmin();
     const res = await get("/api/config", token);
 
@@ -23,7 +23,7 @@ describe("GET /api/config", () => {
 
     const expected = [
       "accounts", "characters", "machines", "hunts", "skills",
-      "assignments", "huntSkillRules", "learningMethods", "learningSources",
+      "assignments", "huntSkillRules", "huntTelemetry", "learningMethods", "learningSources",
       "learningMethodSources", "learningSessions", "learningEvents", "decisionFeedback"
     ];
     for (const key of expected) {

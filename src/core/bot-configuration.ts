@@ -76,6 +76,26 @@ export interface BotHuntSkillRule {
   readonly notes: string | null;
 }
 
+export interface BotHuntTelemetry {
+  readonly id: number;
+  readonly characterId: number;
+  readonly huntId: number;
+  readonly assignmentId: number | null;
+  readonly capturedAt: string;
+  readonly durationSeconds: number | null;
+  readonly xpRatePercent: number;
+  readonly xpGain: number | null;
+  readonly rawXpGain: number | null;
+  readonly xpPerHour: number | null;
+  readonly rawXpPerHour: number | null;
+  readonly lootValue: number | null;
+  readonly suppliesValue: number | null;
+  readonly profit: number | null;
+  readonly creaturesJson: string | null;
+  readonly rawText: string | null;
+  readonly source: "session-analyser" | "ocr" | "manual" | "telemetry";
+}
+
 export interface BotLearningMethod {
   readonly id: number;
   readonly name: string;
@@ -169,6 +189,7 @@ export interface BotConfigurationSnapshot {
   readonly skills: readonly BotSkill[];
   readonly assignments: readonly BotHuntAssignment[];
   readonly huntSkillRules: readonly BotHuntSkillRule[];
+  readonly huntTelemetry: readonly BotHuntTelemetry[];
   readonly learningMethods: readonly BotLearningMethod[];
   readonly learningSources: readonly BotLearningSource[];
   readonly learningMethodSources: readonly BotLearningMethodSource[];

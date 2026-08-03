@@ -14,6 +14,9 @@ import type { RuntimeConfig } from "../config/runtime-config.js";
 import { ConfigUserRepository } from "../database/config-user-repository.js";
 import { ConfigurationRepository } from "../database/configuration-repository.js";
 import { ObsPreviewFrameSource } from "../perception/obs-preview-frame-source.js";
+import { KnowledgeStore } from "../knowledge/knowledge-store.js";
+import { LiveDecisionStore } from "../decision/live-decision-store.js";
+import { parseSessionAnalyser } from "../telemetry/session-analyser-parser.js";
 
 const MAX_JSON_BYTES = 1024 * 1024;
 const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
@@ -131,18 +134,23 @@ export function createConfigServer(
   config: RuntimeConfig,
   pool: Pool,
   publicDir: string,
-  storageDir: string
+  storageDir: string,
+  knowledgeDir = join(storageDir, "knowledge"),
+  decisionLogPath = join(storageDir, "live-decisions.jsonl")
 ): Server {
   const repository = new ConfigurationRepository(pool);
   const userRepository = new ConfigUserRepository(pool);
   const jwtService = new JwtService(config);
   const obsPreview = new ObsPreviewFrameSource(config);
+  const knowledgeStore = new KnowledgeStore(knowledgeDir);
+  const liveDecisionStore = new LiveDecisionStore(decisionLogPath);
   const loginFailures = new Map<string, { count: number; resetAt: number }>();
   const dummyPasswordHash = bcrypt.hash(randomUUID(), 12);
 
   async function handleApi(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const method = request.method ?? "GET";
-    const pathname = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`).pathname;
+    const requestUrl = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+    const pathname = requestUrl.pathname;
 
     if (method === "POST" && pathname === "/api/auth/login") {
       sendJson(response, 200, await login(request, await readJson(request)));
@@ -159,6 +167,61 @@ export function createConfigServer(
     if (method === "GET" && pathname === "/api/config") {
       requireRole(user, "viewer");
       sendJson(response, 200, await repository.getSnapshot());
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/knowledge/coverage") {
+      requireRole(user, "viewer");
+      sendJson(response, 200, await knowledgeStore.coverage());
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/knowledge/search") {
+      requireRole(user, "viewer");
+      const query = (requestUrl.searchParams.get("q") ?? "").trim();
+      if (!query) throw httpError(400, "Knowledge search query is required.");
+      if (query.length > 200) throw httpError(400, "Knowledge search query is limited to 200 characters.");
+      const limit = Number(requestUrl.searchParams.get("limit") ?? 5);
+      sendJson(response, 200, { query, results: await knowledgeStore.search(query, limit) });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/decisions/live") {
+      requireRole(user, "viewer");
+      const limit = Number(requestUrl.searchParams.get("limit") ?? 50);
+      const activeWindowMs = Math.max(config.decisionIntervalMs * 3, 5_000);
+      sendJson(response, 200, await liveDecisionStore.snapshot(limit, activeWindowMs));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/hunt-telemetry") {
+      requireRole(user, "viewer");
+      const characterValue = requestUrl.searchParams.get("characterId");
+      const characterId = characterValue === null ? undefined : Number(characterValue);
+      if (characterId !== undefined && (!Number.isSafeInteger(characterId) || characterId <= 0)) {
+        throw httpError(400, "characterId must be a positive integer.");
+      }
+      sendJson(response, 200, { samples: await repository.listHuntTelemetry(characterId) });
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/hunt-telemetry") {
+      requireRole(user, "operator");
+      sendJson(response, 201, await repository.createHuntTelemetry(await readJson(request)));
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/hunt-telemetry/import-analyser") {
+      requireRole(user, "operator");
+      const payload = await readJson(request);
+      if (typeof payload.rawText !== "string") throw httpError(400, "rawText is required.");
+      const parsed = parseSessionAnalyser(payload.rawText);
+      sendJson(response, 201, await repository.createHuntTelemetry({
+        ...payload,
+        ...parsed,
+        creaturesJson: parsed.creatures,
+        source: "session-analyser"
+      }));
       return;
     }
 

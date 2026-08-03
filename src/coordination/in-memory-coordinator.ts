@@ -5,6 +5,8 @@ import type { PerceptionEvent } from "./perception-event.js";
 export class InMemoryCoordinator {
   private readonly events: PerceptionEvent[] = [];
 
+  constructor(private readonly retainedEvents = 1_000) {}
+
   ingest(result: PerceptionResult): PerceptionEvent {
     const event: PerceptionEvent = {
       id: randomUUID(),
@@ -15,6 +17,7 @@ export class InMemoryCoordinator {
     };
 
     this.events.push(event);
+    if (this.events.length > this.retainedEvents) this.events.splice(0, this.events.length - this.retainedEvents);
     return event;
   }
 

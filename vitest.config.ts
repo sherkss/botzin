@@ -23,6 +23,13 @@ export default defineConfig({
           include: ["tests/frontend/**/*.test.js"],
         },
       },
+      {
+        test: {
+          name: "unit",
+          environment: "node",
+          include: ["tests/learning/**/*.test.ts", "tests/decision/**/*.test.ts", "tests/telemetry/**/*.test.ts"],
+        },
+      },
     ],
   },
 });

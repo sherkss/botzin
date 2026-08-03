@@ -33,6 +33,13 @@ enum AssignmentStatus {
   disabled
 }
 
+enum HuntTelemetrySource {
+  session_analyser @map("session-analyser")
+  ocr
+  manual
+  telemetry
+}
+
 enum LearningMethodType {
   manual_rules        @map("manual-rules")
   human_demonstration @map("human-demonstration")
@@ -145,6 +152,7 @@ model BotCharacter {
   account         BotAccount           @relation(fields: [accountId], references: [id], onDelete: Cascade, map: "fk_bot_characters_account")
   assignments     BotHuntAssignment[]
   learningMethods BotLearningMethod[]
+  huntTelemetry   BotHuntTelemetry[]
 
   @@unique([accountId, name], map: "uq_bot_characters_account_name")
   @@map("bot_characters")
@@ -178,6 +186,7 @@ model BotHunt {
   assignments     BotHuntAssignment[]
   skillRules      BotHuntSkillRule[]
   learningMethods BotLearningMethod[]
+  huntTelemetry   BotHuntTelemetry[]
 
   @@map("bot_hunts")
 }
@@ -216,9 +225,38 @@ model BotHuntAssignment {
   hunt            BotHunt                @relation(fields: [huntId], references: [id], onDelete: Restrict, map: "fk_bot_hunt_assignments_hunt")
   learningSession BotLearningSession[]
   feedback        BotDecisionFeedback[]
+  huntTelemetry   BotHuntTelemetry[]
 
   @@unique([machineId, characterId], map: "uq_bot_hunt_assignments_machine_character")
   @@map("bot_hunt_assignments")
+}
+
+model BotHuntTelemetry {
+  id               BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
+  characterId      BigInt              @map("character_id") @db.UnsignedBigInt
+  huntId           BigInt              @map("hunt_id") @db.UnsignedBigInt
+  assignmentId     BigInt?             @map("assignment_id") @db.UnsignedBigInt
+  capturedAt       DateTime            @default(now()) @map("captured_at") @db.Timestamp(0)
+  durationSeconds  Int?                @map("duration_seconds") @db.UnsignedInt
+  xpRatePercent    Int                 @default(150) @map("xp_rate_percent") @db.UnsignedInt
+  xpGain           BigInt?             @map("xp_gain")
+  rawXpGain        BigInt?             @map("raw_xp_gain")
+  xpPerHour        BigInt?             @map("xp_per_hour")
+  rawXpPerHour     BigInt?             @map("raw_xp_per_hour")
+  lootValue        BigInt?             @map("loot_value")
+  suppliesValue    BigInt?             @map("supplies_value")
+  profit           BigInt?
+  creaturesJson    Json?               @map("creatures_json")
+  rawText          String?             @map("raw_text") @db.MediumText
+  source           HuntTelemetrySource @default(session_analyser)
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamp(0)
+  character        BotCharacter        @relation(fields: [characterId], references: [id], onDelete: Cascade, map: "fk_bot_hunt_telemetry_character")
+  hunt             BotHunt             @relation(fields: [huntId], references: [id], onDelete: Restrict, map: "fk_bot_hunt_telemetry_hunt")
+  assignment       BotHuntAssignment?  @relation(fields: [assignmentId], references: [id], onDelete: SetNull, map: "fk_bot_hunt_telemetry_assignment")
+
+  @@index([characterId, capturedAt], map: "idx_bot_hunt_telemetry_character_time")
+  @@index([huntId, capturedAt], map: "idx_bot_hunt_telemetry_hunt_time")
+  @@map("bot_hunt_telemetry")
 }
 
 model BotHuntSkillRule {

@@ -56,6 +56,7 @@ O banco guarda:
 - `bot_skills`: skills/magias com custo de mana, level minimo, vocacoes e hotkey.
 - `bot_hunt_assignments`: qual maquina usa qual char em qual hunt.
 - `bot_hunt_skill_rules`: quais skills entram em cada hunt e em quais condicoes basicas.
+- `bot_hunt_telemetry`: sessoes por char/hunt com profit, XP/h, raw XP/h, loot, supplies e criaturas.
 - `bot_learning_methods`: metodos de aprendizado ativos.
 - `bot_learning_sources`: videos, imagens, textos, paginas, market snapshots, replays e notas.
 - `bot_learning_method_sources`: vinculo entre metodo de aprendizado e fonte.
@@ -207,6 +208,72 @@ Formatos aceitos no upload:
 
 Esses videos nao entram no git; a pasta `storage/` fica local.
 
+### Conhecimento inicial do jogo
+
+Ao executar `npm run migrate` (e também em cada inicialização pelo Docker), o sistema cadastra de forma idempotente:
+
+- o método global `Conhecimento básico do Tibia`, sempre em modo seguro `observe`;
+- uma nota revisada com princípios básicos de sobrevivência, progressão, hunts e economia;
+- as duas playlists de guia para iniciantes e seus vídeos individuais.
+
+Os vídeos do YouTube ficam com status `pending` e confiança `medium`: eles estão catalogados, mas não são tratados como conhecimento processado. Isso evita que títulos ou conteúdo ainda não revisado sejam usados como autorização para executar ações. O catálogo atual inclui:
+
+- [Guia para iniciantes — tutorial completo](https://www.youtube.com/playlist?list=PLQ5_MIYOgaManqqg9HzzpIibf1vQLErJk)
+- [Tibia Premium — guia completo para iniciantes (2026)](https://www.youtube.com/playlist?list=PLQ5_MIYOgaMbcJ6H5d0zsB2WMWyDoQ37B)
+
+O seed fica em `src/learning/basic-game-knowledge.ts`. Para atualizar uma playlist, ajuste o catálogo nesse arquivo e rode novamente `npm run migrate`.
+
+#### Converter as playlists em conhecimento pesquisável
+
+Pré-requisitos no Windows:
+
+```powershell
+winget install Gyan.FFmpeg
+python -m pip install --upgrade yt-dlp openai-whisper
+```
+
+Para baixar as legendas disponíveis, gerar Markdown com timestamps e criar o índice local:
+
+```powershell
+npm run knowledge:ingest
+```
+
+Se algum vídeo não tiver legenda, use o fallback de áudio + Whisper (mais lento e pode exigir bastante memória):
+
+```powershell
+npm run knowledge:ingest:whisper
+```
+
+Por padrão o Whisper usa o modelo `small`. Para escolher outro modelo:
+
+```powershell
+npm run knowledge:ingest:whisper -- --whisper-model turbo
+```
+
+Para recriar somente o índice a partir dos arquivos já baixados:
+
+```powershell
+npm run knowledge:reindex
+```
+
+Os artefatos são gravados em `storage/knowledge/`:
+
+- `raw/`: metadados e legendas originais;
+- `audio/` e `whisper/`: fallback para vídeos sem legenda;
+- `transcripts/`: transcrição normalizada em JSON;
+- `reviewed/`: um Markdown editável por vídeo;
+- `knowledge-index.json`: trechos utilizados pela busca.
+
+Depois, abra a tela `Aprendizado` e use o painel `O que a IA sabe?`. A busca retorna o texto encontrado, o estado de revisão e um link para o timestamp original. Se não existir evidência no índice, a tela informa que a IA ainda não possui uma fonte para responder.
+
+Para revisar um vídeo, corrija o Markdown correspondente em `storage/knowledge/reviewed/`, altere `revisado: false` para `revisado: true` e execute `npm run knowledge:reindex`. O Markdown revisado é a fonte do novo índice, portanto as correções passam a ser exatamente o texto consultado pela IA.
+
+Variáveis opcionais:
+
+- `BOTZIN_KNOWLEDGE_DIR`: troca a pasta de saída;
+- `BOTZIN_PYTHON_COMMAND`: troca o comando Python;
+- `BOTZIN_WHISPER_MODEL`: define o modelo padrão do Whisper.
+
 Cada metodo tem:
 
 - `weight`: peso na decisao.
@@ -220,6 +287,51 @@ Uso recomendado:
 - Usar `execute` apenas para comportamentos confiaveis e revisados.
 
 ## Captura e IA local
+
+### Monitor de decisões ao vivo
+
+O agente agora executa um ciclo contínuo e grava cada observação em `storage/live-decisions.jsonl`. Para iniciar:
+
+```powershell
+npm run dev
+```
+
+Abra a tela `Operações` no painel web. O cartão `Decisões ao vivo` atualiza a cada dois segundos e mostra:
+
+- se o agente está online;
+- decisão e modo (`observe` ou `suggest`);
+- entidades detectadas e confiança visual média;
+- motivos apresentados pela estratégia;
+- comandos candidatos e erros recentes;
+- histórico dos últimos ciclos.
+
+Com a estratégia atual, o resultado correto é `Nenhuma ação` em modo `observe`. Mesmo que uma estratégia futura produza comandos, o monitor os identifica como sugestões até que um executor seja explicitamente conectado.
+
+Quando o painel roda pelo Docker e o agente roda no host, `docker-compose.yml` monta `./storage` como somente leitura no container. Assim, os dois processos compartilham o mesmo histórico sem dar ao painel permissão para alterá-lo.
+
+Configuração opcional:
+
+- `BOTZIN_DECISION_INTERVAL_MS`: intervalo entre ciclos, padrão `2000`;
+- `BOTZIN_DECISION_LOG_PATH`: arquivo JSONL compartilhado pelo agente e pelo painel.
+
+### Telemetria de hunt por personagem
+
+Na tela `Operações`, abra `Telemetria de hunt por char`, selecione o personagem e a hunt e cole o conteúdo do Hunting Session Analyser do Tibia. O importador reconhece:
+
+- duração da sessão;
+- XP gain e raw XP gain;
+- XP/h exibido e raw XP/h;
+- percentual aplicado ao XP exibido, com `150%` como padrão;
+- loot, supplies e profit/balance;
+- quantidade de cada criatura morta.
+
+Cada amostra é vinculada à atribuição ativa do personagem quando houver correspondência para a hunt. O painel permite filtrar por char e comparar XP/h com bônus, raw XP/h e profit. O texto original também é preservado para auditoria.
+
+Endpoints disponíveis:
+
+- `POST /api/hunt-telemetry/import-analyser`: interpreta texto copiado do cliente;
+- `POST /api/hunt-telemetry`: recebe telemetria estruturada de um coletor OCR ou externo;
+- `GET /api/hunt-telemetry?characterId=...`: consulta o histórico do personagem.
 
 O projeto possui dois modos:
 

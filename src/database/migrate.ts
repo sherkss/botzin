@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { createMysqlPool } from "./mysql-pool.js";
 import type { RowDataPacket } from "mysql2/promise";
+import { seedBasicGameKnowledge } from "../learning/basic-game-knowledge.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const schemaPath = resolve(currentDir, "../../database/schema.sql");
@@ -36,16 +37,16 @@ async function main(): Promise<void> {
     );
   }
 
-  const [foreignKeys] = await pool.query<Array<RowDataPacket & { constraint_name: string; delete_rule: string }>>(
-    `SELECT constraint_name, delete_rule
+  const [foreignKeys] = await pool.query<Array<RowDataPacket & { constraintName: string; deleteRule: string }>>(
+    `SELECT constraint_name AS constraintName, delete_rule AS deleteRule
        FROM information_schema.referential_constraints
       WHERE constraint_schema = ? AND table_name = 'bot_decision_feedback'
         AND constraint_name IN ('fk_bot_decision_feedback_event', 'fk_bot_decision_feedback_assignment')`,
     [config.mysqlDatabase]
   );
   for (const foreignKey of foreignKeys) {
-    if (foreignKey.delete_rule === "CASCADE") continue;
-    const name = String(foreignKey.constraint_name);
+    if (foreignKey.deleteRule === "CASCADE") continue;
+    const name = String(foreignKey.constraintName);
     await pool.query(`ALTER TABLE bot_decision_feedback DROP FOREIGN KEY \`${name}\``);
     if (name === "fk_bot_decision_feedback_event") {
       await pool.query("ALTER TABLE bot_decision_feedback ADD CONSTRAINT fk_bot_decision_feedback_event FOREIGN KEY (learning_event_id) REFERENCES bot_learning_events (id) ON DELETE CASCADE");
@@ -53,6 +54,8 @@ async function main(): Promise<void> {
       await pool.query("ALTER TABLE bot_decision_feedback ADD CONSTRAINT fk_bot_decision_feedback_assignment FOREIGN KEY (assignment_id) REFERENCES bot_hunt_assignments (id) ON DELETE CASCADE");
     }
   }
+
+  await seedBasicGameKnowledge(pool);
 
   await pool.end();
   console.log(`Database schema migrated on ${config.mysqlHost}:${config.mysqlPort}/${config.mysqlDatabase}.`);

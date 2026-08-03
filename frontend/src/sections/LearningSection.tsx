@@ -1,7 +1,9 @@
+import { useEffect, useState, type FormEvent } from "react";
 import { CollapsibleCard } from "../components/CollapsibleCard.tsx";
 import { Field, Input, Select, Textarea } from "../components/Field.tsx";
 import { FormBody, useFormSubmit } from "../components/FormSection.tsx";
-import type { AppState } from "../types.ts";
+import { apiFetch } from "../api.ts";
+import type { AppState, KnowledgeCoverage, KnowledgeSearchResult } from "../types.ts";
 
 interface Props {
   state: AppState;
@@ -14,6 +16,7 @@ export function LearningSection({ state, onRefresh }: Props) {
       <h2 className="mb-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
         Aprendizado
       </h2>
+      <KnowledgeExplorerCard cataloguedSources={state.learningSources.length} />
       <LearningMethodCard state={state} onRefresh={onRefresh} />
       <LearningSessionCard state={state} onRefresh={onRefresh} />
       <LearningSourceCard onRefresh={onRefresh} />
@@ -21,6 +24,103 @@ export function LearningSection({ state, onRefresh }: Props) {
       <LearningMethodSourceCard state={state} onRefresh={onRefresh} />
     </section>
   );
+}
+
+function KnowledgeExplorerCard({ cataloguedSources }: { cataloguedSources: number }) {
+  const [coverage, setCoverage] = useState<KnowledgeCoverage | null>(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<KnowledgeSearchResult[]>([]);
+  const [message, setMessage] = useState("Carregando cobertura...");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void apiFetch<KnowledgeCoverage>("/api/knowledge/coverage")
+      .then((value) => {
+        setCoverage(value);
+        setMessage(value.indexedDocuments > 0 ? "Índice pronto para consulta." : "Execute npm run knowledge:ingest para gerar o índice.");
+      })
+      .catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Falha ao carregar cobertura."));
+  }, []);
+
+  const search = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    const normalized = query.trim();
+    if (!normalized) return;
+    setBusy(true);
+    setMessage("Pesquisando somente nas fontes indexadas...");
+    try {
+      const response = await apiFetch<{ results: KnowledgeSearchResult[] }>(
+        `/api/knowledge/search?q=${encodeURIComponent(normalized)}&limit=8`
+      );
+      setResults(response.results);
+      setMessage(response.results.length > 0
+        ? `${response.results.length} trecho(s) encontrado(s).`
+        : "A IA ainda não possui uma fonte indexada para responder isso.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Falha na pesquisa.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <CollapsibleCard icon="?" iconKind="source" title="O que a IA sabe?" wide>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <KnowledgeMetric label="Fontes cadastradas" value={cataloguedSources} />
+        <KnowledgeMetric label="Documentos indexados" value={coverage?.indexedDocuments ?? 0} />
+        <KnowledgeMetric label="Trechos pesquisáveis" value={coverage?.indexedChunks ?? 0} />
+        <KnowledgeMetric label="Documentos revisados" value={coverage?.reviewedDocuments ?? 0} />
+      </div>
+      <form className="mt-4 flex gap-2" onSubmit={(event) => void search(event)}>
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          maxLength={200}
+          placeholder="Ex.: o que analisar antes de começar uma hunt?"
+          aria-label="Pergunta para a base de conhecimento"
+        />
+        <button
+          type="submit"
+          disabled={busy || !query.trim()}
+          className="rounded-[6px] border border-border bg-panel px-4 py-1.5 text-[13px] font-medium disabled:opacity-50"
+        >
+          {busy ? "Buscando..." : "Pesquisar"}
+        </button>
+      </form>
+      <p className="mt-2 text-[12px] text-muted">{message}</p>
+      {results.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {results.map((result) => (
+            <article key={result.id} className="rounded-[6px] border border-border bg-bg p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-[13px] font-semibold">{result.title}</h3>
+                <span className="text-[11px] text-muted">
+                  {formatKnowledgeTime(result.startSeconds)} {result.reviewed ? "• revisado" : "• transcrição não revisada"}
+                </span>
+              </div>
+              <p className="mt-1 text-[12px] leading-5 text-muted">{result.text}</p>
+              {result.url && <a className="mt-2 inline-block text-[12px] text-accent hover:underline" href={result.url} target="_blank" rel="noreferrer">Abrir fonte no momento citado</a>}
+            </article>
+          ))}
+        </div>
+      )}
+    </CollapsibleCard>
+  );
+}
+
+function KnowledgeMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-[6px] border border-border bg-bg p-3">
+      <div className="text-[18px] font-semibold">{value}</div>
+      <div className="text-[11px] text-muted">{label}</div>
+    </div>
+  );
+}
+
+function formatKnowledgeTime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remaining = Math.floor(seconds % 60);
+  return `${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
 }
 
 function LearningMethodCard({ state, onRefresh }: Props) {

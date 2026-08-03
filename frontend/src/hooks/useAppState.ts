@@ -10,6 +10,7 @@ const EMPTY: AppState = {
   skills: [],
   assignments: [],
   huntSkillRules: [],
+  huntTelemetry: [],
   learningMethods: [],
   learningSources: [],
   learningMethodSources: [],

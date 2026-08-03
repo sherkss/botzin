@@ -7,6 +7,7 @@ import type {
   BotHunt,
   BotHuntAssignment,
   BotHuntSkillRule,
+  BotHuntTelemetry,
   BotDecisionFeedback,
   BotLearningEvent,
   BotLearningMethod,
@@ -29,6 +30,7 @@ export class ConfigurationRepository {
       skills,
       assignments,
       huntSkillRules,
+      huntTelemetry,
       learningMethods,
       learningSources,
       learningMethodSources,
@@ -43,6 +45,7 @@ export class ConfigurationRepository {
       this.listSkills(),
       this.listAssignments(),
       this.listHuntSkillRules(),
+      this.listHuntTelemetry(),
       this.listLearningMethods(),
       this.listLearningSources(),
       this.listLearningMethodSources(),
@@ -59,6 +62,7 @@ export class ConfigurationRepository {
       skills,
       assignments,
       huntSkillRules,
+      huntTelemetry,
       learningMethods,
       learningSources,
       learningMethodSources,
@@ -231,6 +235,54 @@ export class ConfigurationRepository {
       ]
     );
     return this.getHuntSkillRule(result.insertId);
+  }
+
+  async listHuntTelemetry(characterId?: number): Promise<readonly BotHuntTelemetry[]> {
+    const where = characterId === undefined ? "" : " WHERE character_id = ?";
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id, character_id, hunt_id, assignment_id, captured_at, duration_seconds, xp_rate_percent,
+              xp_gain, raw_xp_gain, xp_per_hour, raw_xp_per_hour, loot_value, supplies_value, profit,
+              CAST(creatures_json AS CHAR) AS creatures_json, raw_text, source
+         FROM bot_hunt_telemetry${where}
+        ORDER BY captured_at DESC, id DESC LIMIT 200`,
+      characterId === undefined ? [] : [characterId]
+    );
+    return rows.map(mapHuntTelemetry);
+  }
+
+  async createHuntTelemetry(input: Record<string, unknown>): Promise<BotHuntTelemetry> {
+    const characterId = requiredNumber(input.characterId, "characterId");
+    const huntId = requiredNumber(input.huntId, "huntId");
+    let assignmentId = optionalId(input.assignmentId, "assignmentId");
+    if (assignmentId === null) {
+      const [assignments] = await this.pool.execute<RowDataPacket[]>(
+        "SELECT id FROM bot_hunt_assignments WHERE character_id = ? AND hunt_id = ? AND status = 'active' ORDER BY priority DESC, id DESC LIMIT 1",
+        [characterId, huntId]
+      );
+      assignmentId = assignments[0] ? Number(assignments[0].id) : null;
+    }
+    const xpRatePercent = integerValue(input.xpRatePercent, 150, "xpRatePercent");
+    if (xpRatePercent <= 0 || xpRatePercent > 1_000) throw new ValidationError('Field "xpRatePercent" must be between 1 and 1000.');
+    const creaturesJson = input.creaturesJson && typeof input.creaturesJson === "object"
+      ? JSON.stringify(input.creaturesJson)
+      : jsonString(input.creaturesJson);
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `INSERT INTO bot_hunt_telemetry
+         (character_id, hunt_id, assignment_id, captured_at, duration_seconds, xp_rate_percent,
+          xp_gain, raw_xp_gain, xp_per_hour, raw_xp_per_hour, loot_value, supplies_value, profit,
+          creatures_json, raw_text, source)
+       VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        characterId, huntId, assignmentId, nullableString(input.capturedAt),
+        nullableNonNegativeInteger(input.durationSeconds, "durationSeconds"), xpRatePercent,
+        nullableFiniteNumber(input.xpGain, "xpGain"), nullableFiniteNumber(input.rawXpGain, "rawXpGain"),
+        nullableFiniteNumber(input.xpPerHour, "xpPerHour"), nullableFiniteNumber(input.rawXpPerHour, "rawXpPerHour"),
+        nullableFiniteNumber(input.lootValue, "lootValue"), nullableFiniteNumber(input.suppliesValue, "suppliesValue"),
+        nullableFiniteNumber(input.profit, "profit"), creaturesJson, nullableString(input.rawText),
+        enumValue(input.source, ["session-analyser", "ocr", "manual", "telemetry"] as const, "session-analyser", "source")
+      ]
+    );
+    return this.getHuntTelemetry(result.insertId);
   }
 
   async listLearningMethods(): Promise<readonly BotLearningMethod[]> {
@@ -460,6 +512,17 @@ export class ConfigurationRepository {
     return mapSingle(rows, mapHuntSkillRule);
   }
 
+  private async getHuntTelemetry(id: number): Promise<BotHuntTelemetry> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id, character_id, hunt_id, assignment_id, captured_at, duration_seconds, xp_rate_percent,
+              xp_gain, raw_xp_gain, xp_per_hour, raw_xp_per_hour, loot_value, supplies_value, profit,
+              CAST(creatures_json AS CHAR) AS creatures_json, raw_text, source
+         FROM bot_hunt_telemetry WHERE id = ?`,
+      [id]
+    );
+    return mapSingle(rows, mapHuntTelemetry);
+  }
+
   private async getLearningMethod(id: number): Promise<BotLearningMethod> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       "SELECT id, name, method_type, scope, hunt_id, character_id, weight, mode, CAST(config_json AS CHAR) AS config_json, notes, enabled FROM bot_learning_methods WHERE id = ?",
@@ -593,6 +656,28 @@ function mapHuntSkillRule(row: RowDataPacket): BotHuntSkillRule {
     maxCreatures: nullableRowNumber(row.max_creatures),
     enabled: Boolean(row.enabled),
     notes: nullableRowString(row.notes)
+  };
+}
+
+function mapHuntTelemetry(row: RowDataPacket): BotHuntTelemetry {
+  return {
+    id: Number(row.id),
+    characterId: Number(row.character_id),
+    huntId: Number(row.hunt_id),
+    assignmentId: nullableRowNumber(row.assignment_id),
+    capturedAt: new Date(row.captured_at as string).toISOString(),
+    durationSeconds: nullableRowNumber(row.duration_seconds),
+    xpRatePercent: Number(row.xp_rate_percent),
+    xpGain: nullableRowNumber(row.xp_gain),
+    rawXpGain: nullableRowNumber(row.raw_xp_gain),
+    xpPerHour: nullableRowNumber(row.xp_per_hour),
+    rawXpPerHour: nullableRowNumber(row.raw_xp_per_hour),
+    lootValue: nullableRowNumber(row.loot_value),
+    suppliesValue: nullableRowNumber(row.supplies_value),
+    profit: nullableRowNumber(row.profit),
+    creaturesJson: nullableRowString(row.creatures_json),
+    rawText: nullableRowString(row.raw_text),
+    source: row.source as BotHuntTelemetry["source"]
   };
 }
 
