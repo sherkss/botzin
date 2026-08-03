@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { post, json, loginAsOperator } from "../helpers/api.js";
-import { createLearningMethod, createLearningSource } from "../helpers/fixtures.js";
+import { createHunt, createLearningMethod, createLearningSource } from "../helpers/fixtures.js";
 
 describe("POST /api/learning-methods", () => {
   let opToken: string;
+  let huntId: number;
 
   beforeAll(async () => {
     opToken = await loginAsOperator();
+    huntId = (await createHunt(opToken, { name: `Learning-Hunt-${Date.now()}` })).id as number;
   });
 
   it("creates learning method with all fields and returns 201", async () => {
@@ -16,6 +18,7 @@ describe("POST /api/learning-methods", () => {
         name: "Demo Method",
         methodType: "human-demonstration",
         scope: "hunt",
+        huntId,
         weight: 2.5,
         mode: "suggest",
         configJson: '{"key":"value"}',
@@ -31,9 +34,10 @@ describe("POST /api/learning-methods", () => {
     expect(body.name).toBe("Demo Method");
     expect(body.methodType).toBe("human-demonstration");
     expect(body.scope).toBe("hunt");
+    expect(body.huntId).toBe(huntId);
     expect(body.weight).toBeCloseTo(2.5);
     expect(body.mode).toBe("suggest");
-    expect(body.configJson).toBe('{"key":"value"}');
+    expect(JSON.parse(body.configJson as string)).toEqual({ key: "value" });
     expect(body.notes).toBe("Observes human play");
     expect(body.enabled).toBe(true);
   });
@@ -88,7 +92,7 @@ describe("POST /api/learning-sources", () => {
         uri: "https://tibiawiki.com.br/wiki/Knight",
         language: "pt-BR",
         status: "ready",
-        trustLevel: "high",
+        trustLevel: "medium",
         notes: "Reference guide",
         enabled: true
       },
@@ -103,11 +107,11 @@ describe("POST /api/learning-sources", () => {
     expect(body.uri).toBe("https://tibiawiki.com.br/wiki/Knight");
     expect(body.language).toBe("pt-BR");
     expect(body.status).toBe("ready");
-    expect(body.trustLevel).toBe("high");
+    expect(body.trustLevel).toBe("medium");
     expect(body.notes).toBe("Reference guide");
   });
 
-  it("defaults: sourceType='manual-note', status='pending', trustLevel='medium'", async () => {
+  it("defaults: sourceType='manual-note', status='pending', trustLevel='low'", async () => {
     const res = await post(
       "/api/learning-sources",
       { name: "Default Source" },
@@ -118,7 +122,7 @@ describe("POST /api/learning-sources", () => {
     const body = await json<Record<string, unknown>>(res);
     expect(body.sourceType).toBe("manual-note");
     expect(body.status).toBe("pending");
-    expect(body.trustLevel).toBe("medium");
+    expect(body.trustLevel).toBe("low");
   });
 
   it("returns 400 when name is missing", async () => {
@@ -126,6 +130,15 @@ describe("POST /api/learning-sources", () => {
     expect(res.status).toBe(400);
     const body = await json<{ error: string }>(res);
     expect(body.error).toContain('"name"');
+  });
+
+  it("does not let an operator self-approve a high-trust source", async () => {
+    const res = await post(
+      "/api/learning-sources",
+      { name: "Unreviewed source", trustLevel: "verified" },
+      opToken
+    );
+    expect(res.status).toBe(403);
   });
 });
 
@@ -230,12 +243,12 @@ describe("POST /api/learning-sessions", () => {
     expect(body.error).toContain('"name"');
   });
 
-  it("returns 5xx for non-existent methodId (FK violation)", async () => {
+  it("returns 400 for non-existent methodId (FK violation)", async () => {
     const res = await post(
       "/api/learning-sessions",
       { methodId: 999_999, name: "Orphan Session" },
       opToken
     );
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(400);
   });
 });

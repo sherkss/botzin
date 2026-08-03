@@ -100,12 +100,12 @@ describe("POST /api/accounts", () => {
     expect(body.error).toContain('"operator"');
   });
 
-  it("returns 5xx on duplicate loginIdentifier (MySQL unique constraint)", async () => {
+  it("returns 409 on duplicate loginIdentifier", async () => {
     const payload = { name: "Dup", loginIdentifier: "dup@example.com" };
     const first = await post("/api/accounts", payload, opToken);
     expect(first.status).toBe(201);
 
     const second = await post("/api/accounts", payload, opToken);
-    expect(second.status).toBeGreaterThanOrEqual(500);
+    expect(second.status).toBe(409);
   });
 });

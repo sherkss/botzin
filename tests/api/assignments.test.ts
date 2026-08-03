@@ -80,22 +80,22 @@ describe("POST /api/assignments", () => {
     expect(body.error).toContain('"huntId"');
   });
 
-  it("returns 5xx for non-existent machineId (FK violation)", async () => {
+  it("returns 400 for non-existent machineId", async () => {
     const res = await post(
       "/api/assignments",
       { machineId: 999_999, characterId, huntId },
       opToken
     );
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(400);
   });
 
-  it("returns 5xx on duplicate (machineId, characterId) pair (unique constraint)", async () => {
+  it("returns 409 on duplicate (machineId, characterId) pair", async () => {
     // First assignment created in the first test; trying same (machine, character) pair fails.
     const res = await post(
       "/api/assignments",
       { machineId, characterId, huntId },
       opToken
     );
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(409);
   });
 });

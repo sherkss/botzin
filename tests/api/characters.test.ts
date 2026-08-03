@@ -65,19 +65,19 @@ describe("POST /api/characters", () => {
     expect(body.error).toContain('"accountId"');
   });
 
-  it("returns 5xx for a non-existent accountId (FK violation)", async () => {
+  it("returns 400 for a non-existent accountId", async () => {
     const res = await post(
       "/api/characters",
       { accountId: 999_999, name: "Orphan" },
       opToken
     );
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(400);
   });
 
-  it("returns 5xx for duplicate (accountId, name) pair", async () => {
+  it("returns 409 for duplicate (accountId, name) pair", async () => {
     const payload = { accountId, name: "DupChar" };
     await post("/api/characters", payload, opToken);
     const res = await post("/api/characters", payload, opToken);
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(409);
   });
 });

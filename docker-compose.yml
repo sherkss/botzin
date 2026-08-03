@@ -6,19 +6,17 @@ services:
     container_name: botzin-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: ${BOTZIN_MYSQL_ROOT_PASSWORD:?configure BOTZIN_MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: botzin
       MYSQL_USER: botzin
-      MYSQL_PASSWORD: botzin
-    ports:
-      - "3306:3306"
+      MYSQL_PASSWORD: ${BOTZIN_MYSQL_PASSWORD:?configure BOTZIN_MYSQL_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./docker/01-databases.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
       - ./docker/02-schema.sh:/docker-entrypoint-initdb.d/02-schema.sh:ro
       - ./database/schema.sql:/docker-schema.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "botzin", "-pbotzin"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u botzin -p\"$$MYSQL_PASSWORD\""]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -43,9 +41,9 @@ services:
       BOTZIN_MYSQL_HOST: mysql
       BOTZIN_MYSQL_PORT: "3306"
       BOTZIN_MYSQL_USER: botzin
-      BOTZIN_MYSQL_PASSWORD: botzin
+      BOTZIN_MYSQL_PASSWORD: ${BOTZIN_MYSQL_PASSWORD:?configure BOTZIN_MYSQL_PASSWORD}
       BOTZIN_MYSQL_DATABASE: botzin
-      DATABASE_URL: mysql://botzin:botzin@mysql:3306/botzin
+      DATABASE_URL: ${DATABASE_URL:?configure DATABASE_URL}
 
       # ── Web ──
       # 0.0.0.0 é obrigatório dentro do container para a porta ser acessível do host.
@@ -53,15 +51,15 @@ services:
       BOTZIN_WEB_PORT: "4580"
 
       # ── Segredos — troque antes de colocar em produção ──
-      BOTZIN_JWT_SECRET: troque-isso-por-um-segredo-longo-e-aleatorio
+      BOTZIN_JWT_SECRET: ${BOTZIN_JWT_SECRET:?configure BOTZIN_JWT_SECRET}
       BOTZIN_JWT_EXPIRES_IN_SECONDS: "28800"
 
       # ── Admin criado automaticamente no primeiro start ──
       BOTZIN_ADMIN_USERNAME: admin
-      BOTZIN_ADMIN_PASSWORD: admin123
+      BOTZIN_ADMIN_PASSWORD: ${BOTZIN_ADMIN_PASSWORD:?configure BOTZIN_ADMIN_PASSWORD}
       BOTZIN_ADMIN_DISPLAY_NAME: Administrador
     ports:
-      - "4580:4580"
+      - "127.0.0.1:4580:4580"
     volumes:
       - storage_data:/app/storage
 

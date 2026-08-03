@@ -117,9 +117,9 @@ describe("POST /api/hunt-skill-rules", () => {
     expect(body.error).toContain('"skillId"');
   });
 
-  it("returns 5xx on duplicate (huntId, skillId) pair", async () => {
+  it("returns 409 on duplicate (huntId, skillId) pair", async () => {
     // The first test already created a rule for (huntId, skillId).
     const res = await post("/api/hunt-skill-rules", { huntId, skillId }, opToken);
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(409);
   });
 });

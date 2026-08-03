@@ -51,7 +51,7 @@ function ListCard<T>({ title, items, render }: { title: string; items: T[]; rend
 }
 
 function renderSkill(s: Skill): string {
-  const vocations = s.allowedVocations?.split(",").map(v => v.trim()).join(", ") ?? "";
+  const vocations = s.allowedVocations?.join(", ") ?? "";
   return `${s.name} — ${s.category ?? "?"}${vocations ? ` (${vocations})` : ""}`;
 }
 

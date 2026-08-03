@@ -140,6 +140,27 @@ export interface BotLearningMethodSource {
   readonly weight: number;
 }
 
+export interface BotLearningEvent {
+  readonly id: number;
+  readonly sessionId: number;
+  readonly eventType: string;
+  readonly occurredAt: string;
+  readonly stateJson: string | null;
+  readonly actionJson: string | null;
+  readonly reward: number | null;
+  readonly notes: string | null;
+}
+
+export interface BotDecisionFeedback {
+  readonly id: number;
+  readonly learningEventId: number | null;
+  readonly assignmentId: number | null;
+  readonly rating: "good" | "bad" | "unsafe" | "unknown";
+  readonly correctionActionJson: string | null;
+  readonly notes: string | null;
+  readonly createdAt: string;
+}
+
 export interface BotConfigurationSnapshot {
   readonly accounts: readonly BotAccount[];
   readonly characters: readonly BotCharacter[];
@@ -152,4 +173,6 @@ export interface BotConfigurationSnapshot {
   readonly learningSources: readonly BotLearningSource[];
   readonly learningMethodSources: readonly BotLearningMethodSource[];
   readonly learningSessions: readonly BotLearningSession[];
+  readonly learningEvents: readonly BotLearningEvent[];
+  readonly decisionFeedback: readonly BotDecisionFeedback[];
 }

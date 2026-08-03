@@ -69,12 +69,14 @@ Configuração:
 BOTZIN_MYSQL_HOST=127.0.0.1
 BOTZIN_MYSQL_PORT=3306
 BOTZIN_MYSQL_USER=botzin
-BOTZIN_MYSQL_PASSWORD=botzin
+BOTZIN_MYSQL_PASSWORD=use-uma-senha-longa-e-aleatoria
 BOTZIN_MYSQL_DATABASE=botzin
-DATABASE_URL=mysql://botzin:botzin@127.0.0.1:3306/botzin
+DATABASE_URL=mysql://botzin:SENHA_URL_ENCODED@127.0.0.1:3306/botzin
 BOTZIN_WEB_HOST=127.0.0.1
 BOTZIN_WEB_PORT=4580
 ```
+
+Para usar Docker, copie `.env.example` para `.env`, substitua todos os valores `change-me` e ajuste `DATABASE_URL` para apontar ao host `mysql`. O Compose recusa iniciar quando os segredos obrigatorios nao foram configurados e publica somente o painel em `127.0.0.1:4580`; o MySQL permanece acessivel apenas entre os containers.
 
 Comandos:
 
@@ -107,6 +109,7 @@ A tela permite cadastrar contas, chares, maquinas, hunts, skills e as regras:
 - `hunt -> skill`
 - metodos de aprendizado e sessoes de ensino
 - fontes de ensino e vinculo fonte -> metodo
+- eventos de estado/acao/recompensa e feedback humano pela API
 
 Por seguranca, a estrutura inicial grava `secretReference` em vez de gravar a senha pura da conta. Essa referencia pode apontar depois para um cofre local, arquivo criptografado ou variavel de ambiente controlada.
 

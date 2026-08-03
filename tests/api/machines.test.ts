@@ -72,10 +72,10 @@ describe("POST /api/machines", () => {
     expect(body.error).toContain('"name"');
   });
 
-  it("returns 5xx on duplicate nodeId (unique constraint)", async () => {
+  it("returns 409 on duplicate nodeId", async () => {
     const payload = { nodeId: "dup-node", name: "First" };
     await post("/api/machines", payload, opToken);
     const res = await post("/api/machines", { nodeId: "dup-node", name: "Second" }, opToken);
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(409);
   });
 });

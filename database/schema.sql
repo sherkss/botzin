@@ -168,7 +168,7 @@ CREATE TABLE IF NOT EXISTS bot_learning_sources (
   content_hash VARCHAR(128) NULL,
   language VARCHAR(16) NULL,
   status ENUM('pending', 'processing', 'ready', 'failed', 'archived') NOT NULL DEFAULT 'pending',
-  trust_level ENUM('low', 'medium', 'high', 'verified') NOT NULL DEFAULT 'medium',
+  trust_level ENUM('low', 'medium', 'high', 'verified') NOT NULL DEFAULT 'low',
   captured_at TIMESTAMP NULL,
   processed_at TIMESTAMP NULL,
   metadata_json JSON NULL,
@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS bot_learning_sources (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
+  UNIQUE KEY uq_bot_learning_sources_content_hash (content_hash),
   KEY idx_bot_learning_sources_type_status (source_type, status)
 );
 
@@ -241,8 +242,8 @@ CREATE TABLE IF NOT EXISTS bot_decision_feedback (
   PRIMARY KEY (id),
   CONSTRAINT fk_bot_decision_feedback_event
     FOREIGN KEY (learning_event_id) REFERENCES bot_learning_events (id)
-    ON DELETE SET NULL,
+    ON DELETE CASCADE,
   CONSTRAINT fk_bot_decision_feedback_assignment
     FOREIGN KEY (assignment_id) REFERENCES bot_hunt_assignments (id)
-    ON DELETE SET NULL
+    ON DELETE CASCADE
 );

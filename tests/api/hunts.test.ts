@@ -44,9 +44,9 @@ describe("POST /api/hunts", () => {
     expect(body.error).toContain('"name"');
   });
 
-  it("returns 5xx on duplicate hunt name (unique constraint)", async () => {
+  it("returns 409 on duplicate hunt name", async () => {
     await post("/api/hunts", { name: "Dup Hunt" }, opToken);
     const res = await post("/api/hunts", { name: "Dup Hunt" }, opToken);
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(409);
   });
 });

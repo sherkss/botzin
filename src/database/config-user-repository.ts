@@ -13,6 +13,15 @@ export class ConfigUserRepository {
     return rows.length === 1 ? mapConfigUser(rows[0]) : null;
   }
 
+  async findById(id: number): Promise<ConfigUser | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT id, username, display_name, password_hash, role, enabled FROM config_users WHERE id = ?",
+      [id]
+    );
+
+    return rows.length === 1 ? mapConfigUser(rows[0]) : null;
+  }
+
   async createOrUpdateUser(input: {
     readonly username: string;
     readonly displayName: string;

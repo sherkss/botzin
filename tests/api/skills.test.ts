@@ -116,10 +116,10 @@ describe("POST /api/skills", () => {
     expect(body.error).toContain("cooldownMs");
   });
 
-  it("returns 5xx on duplicate name (unique constraint)", async () => {
+  it("returns 409 on duplicate name", async () => {
     const payload = { name: "Dup Skill", allowedVocations: "knight" };
     await post("/api/skills", payload, opToken);
     const res = await post("/api/skills", payload, opToken);
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(409);
   });
 });

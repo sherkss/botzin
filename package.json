@@ -33,7 +33,7 @@
     "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.14.0",
     "obs-websocket-js": "^5.0.8",
-    "onnxruntime-node": "^1.26.0",
+    "onnxruntime-node": "1.21.1",
     "prisma": "^6.19.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

@@ -7,6 +7,8 @@ import type {
   BotHunt,
   BotHuntAssignment,
   BotHuntSkillRule,
+  BotDecisionFeedback,
+  BotLearningEvent,
   BotLearningMethod,
   BotLearningMethodSource,
   BotLearningSession,
@@ -30,7 +32,9 @@ export class ConfigurationRepository {
       learningMethods,
       learningSources,
       learningMethodSources,
-      learningSessions
+      learningSessions,
+      learningEvents,
+      decisionFeedback
     ] = await Promise.all([
       this.listAccounts(),
       this.listCharacters(),
@@ -42,7 +46,9 @@ export class ConfigurationRepository {
       this.listLearningMethods(),
       this.listLearningSources(),
       this.listLearningMethodSources(),
-      this.listLearningSessions()
+      this.listLearningSessions(),
+      this.listLearningEvents(),
+      this.listDecisionFeedback()
     ]);
 
     return {
@@ -56,7 +62,9 @@ export class ConfigurationRepository {
       learningMethods,
       learningSources,
       learningMethodSources,
-      learningSessions
+      learningSessions,
+      learningEvents,
+      decisionFeedback
     };
   }
 
@@ -96,7 +104,7 @@ export class ConfigurationRepository {
         requiredString(input.name, "name"),
         nullableString(input.world),
         nullableString(input.vocation),
-        nullableNumber(input.level),
+        nullableNonNegativeInteger(input.level, "level"),
         booleanValue(input.enabled, true)
       ]
     );
@@ -116,7 +124,7 @@ export class ConfigurationRepository {
       [
         requiredString(input.nodeId, "nodeId"),
         requiredString(input.name, "name"),
-        stringValue(input.role, "perception"),
+        enumValue(input.role, ["perception", "coordinator", "raspberry-executor"] as const, "perception", "role"),
         nullableString(input.preferredHost),
         nullableString(input.connectionNotes),
         booleanValue(input.enabled, true)
@@ -139,7 +147,7 @@ export class ConfigurationRepository {
         requiredString(input.name, "name"),
         nullableString(input.city),
         nullableString(input.routeProfile),
-        nullableNumber(input.minLevel),
+        nullableNonNegativeInteger(input.minLevel, "minLevel"),
         nullableString(input.notes),
         booleanValue(input.enabled, true)
       ]
@@ -161,7 +169,7 @@ export class ConfigurationRepository {
         requiredString(input.name, "name"),
         nullableString(input.spellWords),
         nullableString(input.hotkey),
-        stringValue(input.category, "attack"),
+        enumValue(input.category, ["attack", "healing", "support", "utility"] as const, "attack", "category"),
         nonNegativeNumber(input.manaCost, 0, "manaCost"),
         nonNegativeNumber(input.requiredLevel, 0, "requiredLevel"),
         requiredString(input.allowedVocations, "allowedVocations"),
@@ -187,8 +195,8 @@ export class ConfigurationRepository {
         requiredNumber(input.machineId, "machineId"),
         requiredNumber(input.characterId, "characterId"),
         requiredNumber(input.huntId, "huntId"),
-        stringValue(input.status, "planned"),
-        numberValue(input.priority, 100),
+        enumValue(input.status, ["planned", "active", "paused", "disabled"] as const, "planned", "status"),
+        integerValue(input.priority, 100, "priority"),
         nullableString(input.notes)
       ]
     );
@@ -203,18 +211,21 @@ export class ConfigurationRepository {
   }
 
   async createHuntSkillRule(input: Record<string, unknown>): Promise<BotHuntSkillRule> {
+    assertOrderedRange(input.minManaPercent, input.maxManaPercent, "mana percent");
+    assertOrderedRange(input.minHpPercent, input.maxHpPercent, "HP percent");
+    assertOrderedRange(input.minCreatures, input.maxCreatures, "creatures");
     const [result] = await this.pool.execute<ResultSetHeader>(
       "INSERT INTO bot_hunt_skill_rules (hunt_id, skill_id, priority, min_mana_percent, max_mana_percent, min_hp_percent, max_hp_percent, min_creatures, max_creatures, enabled, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         requiredNumber(input.huntId, "huntId"),
         requiredNumber(input.skillId, "skillId"),
-        numberValue(input.priority, 100),
+        integerValue(input.priority, 100, "priority"),
         nullablePercent(input.minManaPercent, "minManaPercent"),
         nullablePercent(input.maxManaPercent, "maxManaPercent"),
         nullablePercent(input.minHpPercent, "minHpPercent"),
         nullablePercent(input.maxHpPercent, "maxHpPercent"),
-        nullableNumber(input.minCreatures),
-        nullableNumber(input.maxCreatures),
+        nullableNonNegativeInteger(input.minCreatures, "minCreatures"),
+        nullableNonNegativeInteger(input.maxCreatures, "maxCreatures"),
         booleanValue(input.enabled, true),
         nullableString(input.notes)
       ]
@@ -230,16 +241,25 @@ export class ConfigurationRepository {
   }
 
   async createLearningMethod(input: Record<string, unknown>): Promise<BotLearningMethod> {
+    const scope = enumValue(input.scope, ["global", "hunt", "character", "party"] as const, "global", "scope");
+    const huntId = optionalId(input.huntId, "huntId");
+    const characterId = optionalId(input.characterId, "characterId");
+    if (scope === "hunt" && huntId === null) {
+      throw new ValidationError('Field "huntId" is required when scope is "hunt".');
+    }
+    if (scope === "character" && characterId === null) {
+      throw new ValidationError('Field "characterId" is required when scope is "character".');
+    }
     const [result] = await this.pool.execute<ResultSetHeader>(
       "INSERT INTO bot_learning_methods (name, method_type, scope, hunt_id, character_id, weight, mode, config_json, notes, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         requiredString(input.name, "name"),
-        stringValue(input.methodType, "manual-rules"),
-        stringValue(input.scope, "global"),
-        nullableNumber(input.huntId),
-        nullableNumber(input.characterId),
-        numberValue(input.weight, 1),
-        stringValue(input.mode, "observe"),
+        enumValue(input.methodType, ["manual-rules", "human-demonstration", "replay", "human-feedback", "hunt-telemetry", "external-knowledge"] as const, "manual-rules", "methodType"),
+        scope,
+        huntId,
+        characterId,
+        nonNegativeNumber(input.weight, 1, "weight"),
+        enumValue(input.mode, ["observe", "suggest", "execute"] as const, "observe", "mode"),
         jsonString(input.configJson),
         nullableString(input.notes),
         booleanValue(input.enabled, true)
@@ -256,16 +276,29 @@ export class ConfigurationRepository {
   }
 
   async createLearningSource(input: Record<string, unknown>): Promise<BotLearningSource> {
+    const contentHash = nullableString(input.contentHash);
+    if (contentHash && !/^[a-f0-9]{64}$/i.test(contentHash)) {
+      throw new ValidationError('Field "contentHash" must be a SHA-256 hash.');
+    }
+    if (contentHash) {
+      const [duplicates] = await this.pool.execute<RowDataPacket[]>(
+        "SELECT id FROM bot_learning_sources WHERE content_hash = ? LIMIT 1",
+        [contentHash.toLowerCase()]
+      );
+      if (duplicates.length > 0) {
+        throw new ValidationError("A learning source with this content hash already exists.");
+      }
+    }
     const [result] = await this.pool.execute<ResultSetHeader>(
       "INSERT INTO bot_learning_sources (name, source_type, uri, content_hash, language, status, trust_level, captured_at, metadata_json, notes, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         requiredString(input.name, "name"),
-        stringValue(input.sourceType, "manual-note"),
+        enumValue(input.sourceType, ["video", "image", "text", "web-page", "market-snapshot", "obs-recording", "replay", "telemetry", "manual-note"] as const, "manual-note", "sourceType"),
         nullableString(input.uri),
-        nullableString(input.contentHash),
+        contentHash?.toLowerCase() ?? null,
         nullableString(input.language),
-        stringValue(input.status, "pending"),
-        stringValue(input.trustLevel, "medium"),
+        enumValue(input.status, ["pending", "processing", "ready", "failed", "archived"] as const, "pending", "status"),
+        enumValue(input.trustLevel, ["low", "medium", "high", "verified"] as const, "low", "trustLevel"),
         nullableString(input.capturedAt),
         jsonString(input.metadataJson),
         nullableString(input.notes),
@@ -288,15 +321,15 @@ export class ConfigurationRepository {
       [
         requiredNumber(input.methodId, "methodId"),
         requiredNumber(input.sourceId, "sourceId"),
-        stringValue(input.role, "primary"),
-        numberValue(input.weight, 1)
+        enumValue(input.role, ["primary", "validation", "reference", "negative-example"] as const, "primary", "role"),
+        nonNegativeNumber(input.weight, 1, "weight")
       ]
     );
     return {
       methodId: requiredNumber(input.methodId, "methodId"),
       sourceId: requiredNumber(input.sourceId, "sourceId"),
-      role: stringValue(input.role, "primary") as BotLearningMethodSource["role"],
-      weight: numberValue(input.weight, 1)
+      role: enumValue(input.role, ["primary", "validation", "reference", "negative-example"] as const, "primary", "role"),
+      weight: nonNegativeNumber(input.weight, 1, "weight")
     };
   }
 
@@ -312,14 +345,63 @@ export class ConfigurationRepository {
       "INSERT INTO bot_learning_sessions (method_id, assignment_id, name, status, summary_json, notes) VALUES (?, ?, ?, ?, ?, ?)",
       [
         requiredNumber(input.methodId, "methodId"),
-        nullableNumber(input.assignmentId),
+        optionalId(input.assignmentId, "assignmentId"),
         requiredString(input.name, "name"),
-        stringValue(input.status, "recording"),
+        enumValue(input.status, ["recording", "reviewing", "approved", "rejected", "archived"] as const, "recording", "status"),
         jsonString(input.summaryJson),
         nullableString(input.notes)
       ]
     );
     return this.getLearningSession(result.insertId);
+  }
+
+  async listLearningEvents(): Promise<readonly BotLearningEvent[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      "SELECT id, session_id, event_type, occurred_at, CAST(state_json AS CHAR) AS state_json, CAST(action_json AS CHAR) AS action_json, reward, notes FROM bot_learning_events ORDER BY occurred_at, id"
+    );
+    return rows.map(mapLearningEvent);
+  }
+
+  async createLearningEvent(input: Record<string, unknown>): Promise<BotLearningEvent> {
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      "INSERT INTO bot_learning_events (session_id, event_type, occurred_at, state_json, action_json, reward, notes) VALUES (?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?, ?)",
+      [
+        requiredNumber(input.sessionId, "sessionId"),
+        requiredString(input.eventType, "eventType"),
+        nullableString(input.occurredAt),
+        jsonString(input.stateJson),
+        jsonString(input.actionJson),
+        nullableFiniteNumber(input.reward, "reward"),
+        nullableString(input.notes)
+      ]
+    );
+    return this.getLearningEvent(result.insertId);
+  }
+
+  async listDecisionFeedback(): Promise<readonly BotDecisionFeedback[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      "SELECT id, learning_event_id, assignment_id, rating, CAST(correction_action_json AS CHAR) AS correction_action_json, notes, created_at FROM bot_decision_feedback ORDER BY created_at, id"
+    );
+    return rows.map(mapDecisionFeedback);
+  }
+
+  async createDecisionFeedback(input: Record<string, unknown>): Promise<BotDecisionFeedback> {
+    const learningEventId = optionalId(input.learningEventId, "learningEventId");
+    const assignmentId = optionalId(input.assignmentId, "assignmentId");
+    if (learningEventId === null && assignmentId === null) {
+      throw new ValidationError('At least one of "learningEventId" or "assignmentId" is required.');
+    }
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      "INSERT INTO bot_decision_feedback (learning_event_id, assignment_id, rating, correction_action_json, notes) VALUES (?, ?, ?, ?, ?)",
+      [
+        learningEventId,
+        assignmentId,
+        enumValue(input.rating, ["good", "bad", "unsafe", "unknown"] as const, "unknown", "rating"),
+        jsonString(input.correctionActionJson),
+        nullableString(input.notes)
+      ]
+    );
+    return this.getDecisionFeedback(result.insertId);
   }
 
   private async getAccount(id: number): Promise<BotAccount> {
@@ -400,6 +482,22 @@ export class ConfigurationRepository {
       [id]
     );
     return mapSingle(rows, mapLearningSession);
+  }
+
+  private async getLearningEvent(id: number): Promise<BotLearningEvent> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT id, session_id, event_type, occurred_at, CAST(state_json AS CHAR) AS state_json, CAST(action_json AS CHAR) AS action_json, reward, notes FROM bot_learning_events WHERE id = ?",
+      [id]
+    );
+    return mapSingle(rows, mapLearningEvent);
+  }
+
+  private async getDecisionFeedback(id: number): Promise<BotDecisionFeedback> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT id, learning_event_id, assignment_id, rating, CAST(correction_action_json AS CHAR) AS correction_action_json, notes, created_at FROM bot_decision_feedback WHERE id = ?",
+      [id]
+    );
+    return mapSingle(rows, mapDecisionFeedback);
   }
 }
 
@@ -555,6 +653,31 @@ function mapLearningMethodSource(row: RowDataPacket): BotLearningMethodSource {
   };
 }
 
+function mapLearningEvent(row: RowDataPacket): BotLearningEvent {
+  return {
+    id: Number(row.id),
+    sessionId: Number(row.session_id),
+    eventType: String(row.event_type),
+    occurredAt: new Date(row.occurred_at as string).toISOString(),
+    stateJson: nullableRowString(row.state_json),
+    actionJson: nullableRowString(row.action_json),
+    reward: nullableRowNumber(row.reward),
+    notes: nullableRowString(row.notes)
+  };
+}
+
+function mapDecisionFeedback(row: RowDataPacket): BotDecisionFeedback {
+  return {
+    id: Number(row.id),
+    learningEventId: nullableRowNumber(row.learning_event_id),
+    assignmentId: nullableRowNumber(row.assignment_id),
+    rating: row.rating as BotDecisionFeedback["rating"],
+    correctionActionJson: nullableRowString(row.correction_action_json),
+    notes: nullableRowString(row.notes),
+    createdAt: new Date(row.created_at as string).toISOString()
+  };
+}
+
 function mapSingle<T>(rows: RowDataPacket[], mapper: (row: RowDataPacket) => T): T {
   if (rows.length !== 1) {
     throw new Error("Record was not found after save.");
@@ -581,15 +704,10 @@ function nullableString(value: unknown): string | null {
 
 function requiredNumber(value: unknown, field: string): number {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new ValidationError(`Field "${field}" is required.`);
   }
   return parsed;
-}
-
-function numberValue(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 /** Non-negative number with a fallback. Rejects NaN and negative values. */
@@ -618,26 +736,72 @@ function nullablePercent(value: unknown, field: string): number | null {
   return parsed;
 }
 
-function nullableNumber(value: unknown): number | null {
+function optionalId(value: unknown, field: string): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  return requiredNumber(value, field);
+}
+
+function nullableNonNegativeInteger(value: unknown, field: string): number | null {
+  if (value === undefined || value === null || value === "") return null;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new ValidationError(`Field "${field}" must be a non-negative integer.`);
+  }
+  return parsed;
+}
+
+function integerValue(value: unknown, fallback: number, field: string): number {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new ValidationError(`Field "${field}" must be an integer.`);
+  }
+  return parsed;
 }
 
 function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function jsonString(value: unknown): string {
+function jsonString(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) {
-    return "null";
+    return null;
   }
 
   try {
-    JSON.parse(value);
+    return JSON.stringify(JSON.parse(value));
   } catch {
     throw new ValidationError("Field must contain valid JSON.");
   }
-  return value;
+}
+
+function nullableFiniteNumber(value: unknown, field: string): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new ValidationError(`Field "${field}" must be a number.`);
+  return parsed;
+}
+
+function enumValue<const T extends readonly string[]>(
+  value: unknown,
+  allowed: T,
+  fallback: T[number],
+  field: string
+): T[number] {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string" || !allowed.includes(value)) {
+    throw new ValidationError(`Field "${field}" must be one of: ${allowed.join(", ")}.`);
+  }
+  return value as T[number];
+}
+
+function assertOrderedRange(minimum: unknown, maximum: unknown, label: string): void {
+  if (minimum === undefined || minimum === null || minimum === "" || maximum === undefined || maximum === null || maximum === "") return;
+  const min = Number(minimum);
+  const max = Number(maximum);
+  if (Number.isFinite(min) && Number.isFinite(max) && min > max) {
+    throw new ValidationError(`Minimum ${label} cannot exceed maximum ${label}.`);
+  }
 }
 
 function nullableRowString(value: unknown): string | null {

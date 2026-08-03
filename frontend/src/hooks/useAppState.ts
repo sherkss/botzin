@@ -14,6 +14,8 @@ const EMPTY: AppState = {
   learningSources: [],
   learningMethodSources: [],
   learningSessions: [],
+  learningEvents: [],
+  decisionFeedback: [],
 };
 
 export function useAppState() {

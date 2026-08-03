@@ -270,10 +270,10 @@ model BotLearningSource {
   name        String                    @db.VarChar(160)
   sourceType  LearningSourceType        @map("source_type")
   uri         String?                   @db.Text
-  contentHash String?                   @map("content_hash") @db.VarChar(128)
+  contentHash String?                   @unique(map: "uq_bot_learning_sources_content_hash") @map("content_hash") @db.VarChar(128)
   language    String?                   @db.VarChar(16)
   status      LearningSourceStatus      @default(pending)
-  trustLevel  TrustLevel                @default(medium) @map("trust_level")
+  trustLevel  TrustLevel                @default(low) @map("trust_level")
   capturedAt  DateTime?                 @map("captured_at") @db.Timestamp(0)
   processedAt DateTime?                 @map("processed_at") @db.Timestamp(0)
   metadataJson Json?                    @map("metadata_json")
@@ -341,8 +341,8 @@ model BotDecisionFeedback {
   correctionActionJson Json?              @map("correction_action_json")
   notes            String?                @db.Text
   createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamp(0)
-  learningEvent    BotLearningEvent?      @relation(fields: [learningEventId], references: [id], onDelete: SetNull, map: "fk_bot_decision_feedback_event")
-  assignment       BotHuntAssignment?     @relation(fields: [assignmentId], references: [id], onDelete: SetNull, map: "fk_bot_decision_feedback_assignment")
+  learningEvent    BotLearningEvent?      @relation(fields: [learningEventId], references: [id], onDelete: Cascade, map: "fk_bot_decision_feedback_event")
+  assignment       BotHuntAssignment?     @relation(fields: [assignmentId], references: [id], onDelete: Cascade, map: "fk_bot_decision_feedback_assignment")
 
   @@map("bot_decision_feedback")
 }

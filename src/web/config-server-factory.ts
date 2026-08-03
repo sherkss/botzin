@@ -2,7 +2,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, stat, unlink } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { basename, extname, join, normalize } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import Busboy from "busboy";
 import bcrypt from "bcryptjs";
 import type { Pool } from "mysql2/promise";
@@ -15,7 +15,10 @@ import { ConfigUserRepository } from "../database/config-user-repository.js";
 import { ConfigurationRepository } from "../database/configuration-repository.js";
 import { ObsPreviewFrameSource } from "../perception/obs-preview-frame-source.js";
 
-const MAX_VIDEO_BYTES = 10 * 1024 * 1024 * 1024;
+const MAX_JSON_BYTES = 1024 * 1024;
+const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const MAX_LOGIN_FAILURES = 8;
 
 class HttpError extends Error {
   constructor(
@@ -33,21 +36,56 @@ function httpError(statusCode: number, message: string): HttpError {
 function statusCodeFor(error: unknown): number {
   if (error instanceof HttpError) return error.statusCode;
   if (error instanceof ValidationError) return 400;
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = String(error.code);
+    if (code === "ER_DUP_ENTRY") return 409;
+    if (["ER_NO_REFERENCED_ROW_2", "ER_TRUNCATED_WRONG_VALUE_FOR_FIELD", "ER_DATA_TOO_LONG"].includes(code)) {
+      return 400;
+    }
+  }
   return 500;
 }
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown): void {
-  response.writeHead(statusCode, { "Content-Type": "application/json" });
+  response.writeHead(statusCode, {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer"
+  });
   response.end(JSON.stringify(payload));
 }
 
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
+  let receivedBytes = 0;
+
+  const declaredBytes = Number(request.headers["content-length"] ?? 0);
+  if (Number.isFinite(declaredBytes) && declaredBytes > MAX_JSON_BYTES) {
+    throw httpError(413, "JSON body exceeds the 1 MB limit.");
+  }
+
   for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    receivedBytes += buffer.length;
+    if (receivedBytes > MAX_JSON_BYTES) {
+      request.resume();
+      throw httpError(413, "JSON body exceeds the 1 MB limit.");
+    }
+    chunks.push(buffer);
   }
   if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw httpError(400, "JSON body must be an object.");
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw httpError(400, "JSON body is invalid.");
+  }
 }
 
 function contentType(filePath: string): string {
@@ -65,10 +103,23 @@ function contentType(filePath: string): string {
 
 function isAllowedVideo(filename: string, mimeType: string): boolean {
   const extension = extname(filename).toLowerCase();
-  return (
-    ["video/mp4", "video/x-matroska", "video/quicktime", "video/x-msvideo", "video/webm"].includes(mimeType) ||
-    [".mp4", ".mkv", ".mov", ".avi", ".webm"].includes(extension)
-  );
+  return ["video/mp4", "video/x-matroska", "video/quicktime", "video/x-msvideo", "video/webm"].includes(mimeType) &&
+    [".mp4", ".mkv", ".mov", ".avi", ".webm"].includes(extension);
+}
+
+function hasAllowedVideoSignature(filename: string, header: Buffer): boolean {
+  const extension = extname(filename).toLowerCase();
+  if (extension === ".mp4" || extension === ".mov") {
+    return header.length >= 8 && header.subarray(4, 8).toString("ascii") === "ftyp";
+  }
+  if (extension === ".avi") {
+    return header.length >= 12 && header.subarray(0, 4).toString("ascii") === "RIFF" &&
+      header.subarray(8, 11).toString("ascii") === "AVI";
+  }
+  if (extension === ".mkv" || extension === ".webm") {
+    return header.length >= 4 && header.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+  }
+  return false;
 }
 
 function sanitizeFilename(filename: string): string {
@@ -86,17 +137,19 @@ export function createConfigServer(
   const userRepository = new ConfigUserRepository(pool);
   const jwtService = new JwtService(config);
   const obsPreview = new ObsPreviewFrameSource(config);
+  const loginFailures = new Map<string, { count: number; resetAt: number }>();
+  const dummyPasswordHash = bcrypt.hash(randomUUID(), 12);
 
   async function handleApi(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const method = request.method ?? "GET";
     const pathname = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`).pathname;
 
     if (method === "POST" && pathname === "/api/auth/login") {
-      sendJson(response, 200, await login(await readJson(request)));
+      sendJson(response, 200, await login(request, await readJson(request)));
       return;
     }
 
-    const user = authenticate(request);
+    const user = await authenticate(request);
 
     if (method === "GET" && pathname === "/api/auth/me") {
       sendJson(response, 200, { user });
@@ -170,13 +223,17 @@ export function createConfigServer(
 
     if (method === "POST" && pathname === "/api/learning-methods") {
       requireRole(user, "operator");
-      sendJson(response, 201, await repository.createLearningMethod(await readJson(request)));
+      const payload = await readJson(request);
+      if (payload.mode === "execute") requireRole(user, "admin");
+      sendJson(response, 201, await repository.createLearningMethod(payload));
       return;
     }
 
     if (method === "POST" && pathname === "/api/learning-sources") {
       requireRole(user, "operator");
-      sendJson(response, 201, await repository.createLearningSource(await readJson(request)));
+      const payload = await readJson(request);
+      if (payload.trustLevel === "high" || payload.trustLevel === "verified") requireRole(user, "admin");
+      sendJson(response, 201, await repository.createLearningSource(payload));
       return;
     }
 
@@ -198,10 +255,24 @@ export function createConfigServer(
       return;
     }
 
+    if (method === "POST" && pathname === "/api/learning-events") {
+      requireRole(user, "operator");
+      sendJson(response, 201, await repository.createLearningEvent(await readJson(request)));
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/decision-feedback") {
+      requireRole(user, "operator");
+      sendJson(response, 201, await repository.createDecisionFeedback(await readJson(request)));
+      return;
+    }
+
     sendJson(response, 404, { error: "API route not found." });
   }
 
-  async function login(payload: Record<string, unknown>): Promise<unknown> {
+  async function login(request: IncomingMessage, payload: Record<string, unknown>): Promise<unknown> {
+    const clientKey = request.socket.remoteAddress ?? "unknown";
+    enforceLoginRateLimit(clientKey);
     const username = typeof payload.username === "string" ? payload.username.trim() : "";
     const password = typeof payload.password === "string" ? payload.password : "";
 
@@ -211,14 +282,18 @@ export function createConfigServer(
 
     const user = await userRepository.findByUsername(username);
     if (!user || !user.enabled) {
+      await bcrypt.compare(password, await dummyPasswordHash);
+      recordLoginFailure(clientKey);
       throw httpError(401, "Invalid username or password.");
     }
 
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
+      recordLoginFailure(clientKey);
       throw httpError(401, "Invalid username or password.");
     }
 
+    loginFailures.delete(clientKey);
     await userRepository.markLogin(user.id);
 
     const safeUser: AuthenticatedConfigUser = {
@@ -231,7 +306,7 @@ export function createConfigServer(
     return { token: jwtService.sign(safeUser), user: safeUser };
   }
 
-  function authenticate(request: IncomingMessage): AuthenticatedConfigUser {
+  async function authenticate(request: IncomingMessage): Promise<AuthenticatedConfigUser> {
     const authorization = request.headers.authorization ?? "";
     const [scheme, token] = authorization.split(" ");
 
@@ -240,10 +315,37 @@ export function createConfigServer(
     }
 
     try {
-      return jwtService.verify(token);
+      const tokenUser = jwtService.verify(token);
+      const currentUser = await userRepository.findById(tokenUser.id);
+      if (!currentUser || !currentUser.enabled || currentUser.username !== tokenUser.username || currentUser.role !== tokenUser.role) {
+        throw new Error("Token user is no longer authorized.");
+      }
+      return tokenUser;
     } catch {
       throw httpError(401, "Invalid or expired token.");
     }
+  }
+
+  function enforceLoginRateLimit(clientKey: string): void {
+    const now = Date.now();
+    const entry = loginFailures.get(clientKey);
+    if (!entry || entry.resetAt <= now) {
+      loginFailures.delete(clientKey);
+      return;
+    }
+    if (entry.count >= MAX_LOGIN_FAILURES) {
+      throw httpError(429, "Too many login attempts. Try again later.");
+    }
+  }
+
+  function recordLoginFailure(clientKey: string): void {
+    const now = Date.now();
+    const current = loginFailures.get(clientKey);
+    if (!current || current.resetAt <= now) {
+      loginFailures.set(clientKey, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+      return;
+    }
+    current.count += 1;
   }
 
   function requireRole(user: AuthenticatedConfigUser, role: ConfigUserRole): void {
@@ -262,13 +364,23 @@ export function createConfigServer(
       let originalFilename: string | null = null;
       let mimeType: string | null = null;
       let fileWrite: Promise<void> | null = null;
+      let fileWriter: ReturnType<typeof createWriteStream> | null = null;
+      let fileHash: ReturnType<typeof createHash> | null = null;
+      let fileHeader = Buffer.alloc(0);
       let settled = false;
 
       const fail = (error: unknown): void => {
         if (settled) return;
         settled = true;
         request.unpipe(busboy);
-        void cleanupPartialFile(storedPath);
+        const partialPath = storedPath;
+        if (fileWriter && !fileWriter.closed) {
+          fileWriter.once("close", () => { void cleanupPartialFile(partialPath); });
+          fileWriter.destroy();
+          void fileWrite?.catch(() => undefined);
+        } else {
+          void cleanupPartialFile(partialPath);
+        }
         reject(error);
       };
 
@@ -287,6 +399,12 @@ export function createConfigServer(
         const safeName = sanitizeFilename(info.filename);
         storedPath = join(storageDir, `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID()}-${safeName}`);
         const writer = createWriteStream(storedPath);
+        fileWriter = writer;
+        fileHash = createHash("sha256");
+        file.on("data", (chunk: Buffer) => {
+          fileHash?.update(chunk);
+          if (fileHeader.length < 12) fileHeader = Buffer.concat([fileHeader, chunk.subarray(0, 12 - fileHeader.length)]);
+        });
         file.pipe(writer);
         fileWrite = new Promise((resolveWrite, rejectWrite) => {
           writer.on("finish", resolveWrite);
@@ -303,14 +421,18 @@ export function createConfigServer(
           if (!storedPath || !fileWrite) throw new ValidationError("No video file was uploaded.");
           await fileWrite;
 
+          if (!originalFilename || !hasAllowedVideoSignature(originalFilename, fileHeader)) {
+            throw new ValidationError("Uploaded file content does not match the declared video format.");
+          }
+          if (!fileHash) throw new ValidationError("Unable to hash the uploaded video.");
           const source = await repository.createLearningSource({
             name: fields.name || originalFilename || basename(storedPath),
             sourceType: fields.sourceType || "video",
             uri: storedPath,
-            contentHash: null,
+            contentHash: fileHash.digest("hex"),
             language: fields.language || null,
             status: "pending",
-            trustLevel: fields.trustLevel || "medium",
+            trustLevel: "low",
             capturedAt: fields.capturedAt || null,
             metadataJson: JSON.stringify({ originalFilename, mimeType, hunt: fields.hunt || null, quest: fields.quest || null }),
             notes: fields.notes || null,
@@ -326,6 +448,7 @@ export function createConfigServer(
       });
 
       request.pipe(busboy);
+      request.on("aborted", () => fail(new ValidationError("Upload was interrupted.")));
     });
   }
 
@@ -350,7 +473,13 @@ export function createConfigServer(
       return;
     }
 
-    response.writeHead(200, { "Content-Type": contentType(filePath) });
+    response.writeHead(200, {
+      "Content-Type": contentType(filePath),
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "no-referrer",
+      "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; connect-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+    });
     createReadStream(filePath).pipe(response);
   }
 
@@ -362,8 +491,13 @@ export function createConfigServer(
       }
       await serveStatic(request, response);
     } catch (error) {
-      sendJson(response, statusCodeFor(error), {
-        error: error instanceof Error ? error.message : "Unexpected server error."
+      const statusCode = statusCodeFor(error);
+      const errorId = randomUUID();
+      if (statusCode >= 500) console.error(`[${errorId}]`, error);
+      sendJson(response, statusCode, {
+        error: statusCode >= 500
+          ? `Unexpected server error. Reference: ${errorId}`
+          : error instanceof Error ? error.message : "Request failed."
       });
     }
   });

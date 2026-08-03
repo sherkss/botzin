@@ -1,91 +1,104 @@
 export interface User {
-  id: string;
+  id: number;
   username: string;
   displayName: string;
   role: string;
 }
 
 export interface Account {
-  id: string;
+  id: number;
   name: string;
   loginIdentifier?: string;
 }
 
 export interface Character {
-  id: string;
+  id: number;
   name: string;
-  accountId: string;
+  accountId: number;
   world?: string;
   vocation?: string;
   level?: number;
 }
 
 export interface Machine {
-  id: string;
+  id: number;
   nodeId: string;
   name: string;
   role?: string;
 }
 
 export interface Hunt {
-  id: string;
+  id: number;
   name: string;
   city?: string;
 }
 
 export interface Skill {
-  id: string;
+  id: number;
   name: string;
-  allowedVocations: string;
+  allowedVocations: string[];
   category?: string;
 }
 
 export interface Assignment {
-  id: string;
-  machineId: string;
-  characterId: string;
-  huntId: string;
+  id: number;
+  machineId: number;
+  characterId: number;
+  huntId: number;
   status: string;
   priority?: number;
 }
 
 export interface HuntSkillRule {
-  id: string;
-  huntId: string;
-  skillId: string;
+  id: number;
+  huntId: number;
+  skillId: number;
   priority?: number;
 }
 
 export interface LearningMethod {
-  id: string;
+  id: number;
   name: string;
   methodType: string;
   scope?: string;
-  huntId?: string;
-  characterId?: string;
+  huntId?: number;
+  characterId?: number;
 }
 
 export interface LearningSource {
-  id: string;
+  id: number;
   name: string;
   sourceType: string;
   status?: string;
 }
 
 export interface LearningMethodSource {
-  id: string;
-  methodId: string;
-  sourceId: string;
+  methodId: number;
+  sourceId: number;
   role: string;
   weight?: number;
 }
 
 export interface LearningSession {
-  id: string;
+  id: number;
   name: string;
-  methodId: string;
-  assignmentId?: string;
+  methodId: number;
+  assignmentId?: number;
   status: string;
+}
+
+export interface LearningEvent {
+  id: number;
+  sessionId: number;
+  eventType: string;
+  reward: number | null;
+}
+
+export interface DecisionFeedback {
+  id: number;
+  learningEventId: number | null;
+  assignmentId: number | null;
+  rating: "good" | "bad" | "unsafe" | "unknown";
 }
 
 export interface AppState {
@@ -100,4 +113,6 @@ export interface AppState {
   learningSources: LearningSource[];
   learningMethodSources: LearningMethodSource[];
   learningSessions: LearningSession[];
+  learningEvents: LearningEvent[];
+  decisionFeedback: DecisionFeedback[];
 }
