@@ -231,7 +231,7 @@ export function createConfigServer(
     if (method === "GET" && pathname === "/api/decisions/live") {
       requireRole(user, "viewer");
       const limit = Number(requestUrl.searchParams.get("limit") ?? 50);
-      const activeWindowMs = Math.max(config.decisionIntervalMs * 3, 5_000);
+      const activeWindowMs = 5_000;
       sendJson(response, 200, await liveDecisionStore.snapshot(limit, activeWindowMs));
       return;
     }
@@ -258,12 +258,22 @@ export function createConfigServer(
       const payload = await readJson(request);
       if (typeof payload.rawText !== "string") throw httpError(400, "rawText is required.");
       const parsed = parseSessionAnalyser(payload.rawText);
-      sendJson(response, 201, await repository.createHuntTelemetry({
+      const telemetry = await repository.createHuntTelemetry({
         ...payload,
         ...parsed,
         creaturesJson: parsed.creatures,
         source: "session-analyser"
-      }));
+      });
+      if (telemetry.runId !== null) {
+        await repository.createCharacterRunSample({
+          runId: telemetry.runId,
+          sampleType: "telemetry",
+          observedAt: telemetry.capturedAt,
+          outcomeJson: telemetry,
+          notes: "Hunting Session Analyser importado durante ou ao final da execução."
+        });
+      }
+      sendJson(response, 201, telemetry);
       return;
     }
 
@@ -320,9 +330,49 @@ export function createConfigServer(
       return;
     }
 
+    if (method === "GET" && pathname === "/api/character-runs") {
+      requireRole(user, "viewer");
+      sendJson(response, 200, { runs: await repository.listCharacterRuns(Number(requestUrl.searchParams.get("limit") ?? 100)) });
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/character-runs/start") {
+      requireRole(user, "operator");
+      sendJson(response, 201, await repository.startCharacterRun(await readJson(request)));
+      return;
+    }
+
+    const finishRunMatch = pathname.match(/^\/api\/character-runs\/(\d+)\/stop$/);
+    if (method === "POST" && finishRunMatch) {
+      requireRole(user, "operator");
+      sendJson(response, 200, await repository.finishCharacterRun(Number(finishRunMatch[1]), await readJson(request)));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/character-run-samples") {
+      requireRole(user, "viewer");
+      const runId = Number(requestUrl.searchParams.get("runId"));
+      if (!Number.isSafeInteger(runId) || runId <= 0) throw httpError(400, "runId must be a positive integer.");
+      sendJson(response, 200, { samples: await repository.listCharacterRunSamples(runId, Number(requestUrl.searchParams.get("limit") ?? 200)) });
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/character-run-samples") {
+      requireRole(user, "operator");
+      sendJson(response, 201, await repository.createCharacterRunSample(await readJson(request)));
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/assignments") {
       requireRole(user, "operator");
       sendJson(response, 201, await repository.createAssignment(await readJson(request)));
+      return;
+    }
+
+    const assignmentStatusMatch = pathname.match(/^\/api\/assignments\/(\d+)\/status$/);
+    if (method === "POST" && assignmentStatusMatch) {
+      requireRole(user, "operator");
+      sendJson(response, 200, await repository.updateAssignmentStatus(Number(assignmentStatusMatch[1]), await readJson(request)));
       return;
     }
 

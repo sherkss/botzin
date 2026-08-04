@@ -42,6 +42,33 @@ async function main(): Promise<void> {
   if (Number(multiActionIndexes[0]?.count ?? 0) === 0) {
     await pool.query("ALTER TABLE bot_client_spell_bindings ADD UNIQUE KEY uq_bot_client_spell_bindings_hotkey_slot (character_id, hotkey, multi_action_slot)");
   }
+  const [telemetryRunColumns] = await pool.query<Array<RowDataPacket & { count: number }>>(
+    "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema=? AND table_name='bot_hunt_telemetry' AND column_name='run_id'",
+    [config.mysqlDatabase]
+  );
+  if (Number(telemetryRunColumns[0]?.count ?? 0) === 0) {
+    await pool.query("ALTER TABLE bot_hunt_telemetry ADD COLUMN run_id BIGINT UNSIGNED NULL AFTER assignment_id");
+  }
+  const [telemetryRunForeignKeys] = await pool.query<Array<RowDataPacket & { count: number }>>(
+    "SELECT COUNT(*) AS count FROM information_schema.table_constraints WHERE constraint_schema=? AND table_name='bot_hunt_telemetry' AND constraint_name='fk_bot_hunt_telemetry_run'",
+    [config.mysqlDatabase]
+  );
+  if (Number(telemetryRunForeignKeys[0]?.count ?? 0) === 0) {
+    await pool.query("ALTER TABLE bot_hunt_telemetry ADD CONSTRAINT fk_bot_hunt_telemetry_run FOREIGN KEY (run_id) REFERENCES bot_character_runs (id) ON DELETE SET NULL");
+  }
+  const assignmentColumns: Record<string, string> = {
+    min_stamina_minutes: "INT UNSIGNED NOT NULL DEFAULT 2340 AFTER priority",
+    refill_config_json: "JSON NULL AFTER min_stamina_minutes"
+  };
+  for (const [column, definition] of Object.entries(assignmentColumns)) {
+    const [columns] = await pool.query<Array<RowDataPacket & { count: number }>>(
+      "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema=? AND table_name='bot_hunt_assignments' AND column_name=?",
+      [config.mysqlDatabase, column]
+    );
+    if (Number(columns[0]?.count ?? 0) === 0) {
+      await pool.query(`ALTER TABLE bot_hunt_assignments ADD COLUMN \`${column}\` ${definition}`);
+    }
+  }
   const creatureColumns: Record<string, string> = {
     armor: "INT UNSIGNED NOT NULL DEFAULT 0", mitigation: "DOUBLE NOT NULL DEFAULT 0", max_damage: "INT UNSIGNED NOT NULL DEFAULT 0",
     damage_by_type_json: "JSON NULL", damage_modifiers_json: "JSON NULL", attacks_json: "JSON NULL", location: "TEXT NULL",

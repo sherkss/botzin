@@ -51,7 +51,6 @@ services:
       BOTZIN_WEB_PORT: "4580"
       BOTZIN_KNOWLEDGE_DIR: /app/host-storage/knowledge
       BOTZIN_DECISION_LOG_PATH: /app/host-storage/live-decisions.jsonl
-      BOTZIN_DECISION_INTERVAL_MS: "2000"
 
       # ── Segredos — troque antes de colocar em produção ──
       BOTZIN_JWT_SECRET: ${BOTZIN_JWT_SECRET:?configure BOTZIN_JWT_SECRET}

@@ -22,7 +22,8 @@ export interface RuntimeConfig {
   readonly onnxLabelsPath: string;
   readonly knowledgeDir: string;
   readonly decisionLogPath: string;
-  readonly decisionIntervalMs: number;
+  readonly runCaptureDir: string;
+  readonly runFrameIntervalMs: number;
   readonly onnxInputWidth: number;
   readonly onnxInputHeight: number;
   readonly detectionConfidence: number;
@@ -64,7 +65,8 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     onnxLabelsPath: env.BOTZIN_ONNX_LABELS_PATH ?? "models/tibia-entities.example.json",
     knowledgeDir: env.BOTZIN_KNOWLEDGE_DIR ?? "storage/knowledge",
     decisionLogPath: env.BOTZIN_DECISION_LOG_PATH ?? "storage/live-decisions.jsonl",
-    decisionIntervalMs: parsePort(env.BOTZIN_DECISION_INTERVAL_MS, 2_000),
+    runCaptureDir: env.BOTZIN_RUN_CAPTURE_DIR ?? "storage/run-samples",
+    runFrameIntervalMs: parsePort(env.BOTZIN_RUN_FRAME_INTERVAL_MS, 10_000),
     onnxInputWidth: parsePort(env.BOTZIN_ONNX_INPUT_WIDTH, 640),
     onnxInputHeight: parsePort(env.BOTZIN_ONNX_INPUT_HEIGHT, 640),
     detectionConfidence: parseNumber(env.BOTZIN_DETECTION_CONFIDENCE, 0.35),

@@ -3,6 +3,8 @@ import { ValidationError } from "../core/errors.js";
 import type {
   BotAccount,
   BotCharacter,
+  BotCharacterRun,
+  BotCharacterRunSample,
   BotClientSpellBinding,
   BotConfigurationSnapshot,
   BotHunt,
@@ -33,6 +35,7 @@ export class ConfigurationRepository {
       assignments,
       huntSkillRules,
       huntTelemetry,
+      characterRuns,
       learningMethods,
       learningSources,
       learningMethodSources,
@@ -49,6 +52,7 @@ export class ConfigurationRepository {
       this.listAssignments(),
       this.listHuntSkillRules(),
       this.listHuntTelemetry(),
+      this.listCharacterRuns(),
       this.listLearningMethods(),
       this.listLearningSources(),
       this.listLearningMethodSources(),
@@ -67,6 +71,7 @@ export class ConfigurationRepository {
       assignments,
       huntSkillRules,
       huntTelemetry,
+      characterRuns,
       learningMethods,
       learningSources,
       learningMethodSources,
@@ -222,24 +227,181 @@ export class ConfigurationRepository {
 
   async listAssignments(): Promise<readonly BotHuntAssignment[]> {
     const [rows] = await this.pool.query<RowDataPacket[]>(
-      "SELECT id, machine_id, character_id, hunt_id, status, priority, notes FROM bot_hunt_assignments ORDER BY priority, id"
+      "SELECT id, machine_id, character_id, hunt_id, status, priority, min_stamina_minutes, CAST(refill_config_json AS CHAR) AS refill_config_json, notes FROM bot_hunt_assignments ORDER BY priority, id"
     );
     return rows.map(mapAssignment);
   }
 
   async createAssignment(input: Record<string, unknown>): Promise<BotHuntAssignment> {
     const [result] = await this.pool.execute<ResultSetHeader>(
-      "INSERT INTO bot_hunt_assignments (machine_id, character_id, hunt_id, status, priority, notes) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO bot_hunt_assignments (machine_id, character_id, hunt_id, status, priority, min_stamina_minutes, refill_config_json, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [
         requiredNumber(input.machineId, "machineId"),
         requiredNumber(input.characterId, "characterId"),
         requiredNumber(input.huntId, "huntId"),
         enumValue(input.status, ["planned", "active", "paused", "disabled"] as const, "planned", "status"),
         integerValue(input.priority, 100, "priority"),
+        boundedInteger(input.minStaminaMinutes, 2340, 0, 2520, "minStaminaMinutes"),
+        jsonValue(input.refillConfigJson),
         nullableString(input.notes)
       ]
     );
     return this.getAssignment(result.insertId);
+  }
+
+  async listCharacterRuns(limit = 100): Promise<readonly BotCharacterRun[]> {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), 500)) : 100;
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT id, assignment_id, machine_id, character_id, hunt_id, status, client_version,
+              CAST(loadout_json AS CHAR) AS loadout_json, CAST(route_snapshot_json AS CHAR) AS route_snapshot_json,
+              started_at, ended_at, notes
+         FROM bot_character_runs ORDER BY started_at DESC, id DESC LIMIT ${safeLimit}`
+    );
+    return rows.map(mapCharacterRun);
+  }
+
+  async startCharacterRun(input: Record<string, unknown>): Promise<BotCharacterRun> {
+    const assignmentId = requiredNumber(input.assignmentId, "assignmentId");
+    const [active] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT id FROM bot_character_runs WHERE assignment_id = ? AND status = 'running' LIMIT 1",
+      [assignmentId]
+    );
+    if (active.length > 0) throw new ValidationError("This assignment already has a running character session.");
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `INSERT INTO bot_character_runs
+         (assignment_id, machine_id, character_id, hunt_id, client_version, loadout_json, route_snapshot_json, notes)
+       SELECT id, machine_id, character_id, hunt_id, ?, ?, ?, ?
+         FROM bot_hunt_assignments WHERE id = ? AND status = 'active'`,
+      [
+        nullableString(input.clientVersion), jsonValue(input.loadoutJson), jsonValue(input.routeSnapshotJson),
+        nullableString(input.notes), assignmentId
+      ]
+    );
+    if (result.affectedRows !== 1) throw new ValidationError("Assignment must exist and be active before starting a run.");
+    return this.getCharacterRun(result.insertId);
+  }
+
+  async finishCharacterRun(id: number, input: Record<string, unknown>): Promise<BotCharacterRun> {
+    const status = enumValue(input.status, ["completed", "aborted"] as const, "completed", "status");
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      "UPDATE bot_character_runs SET status = ?, ended_at = CURRENT_TIMESTAMP, notes = COALESCE(?, notes) WHERE id = ? AND status = 'running'",
+      [status, nullableString(input.notes), id]
+    );
+    if (result.affectedRows !== 1) throw new ValidationError("Running character session was not found.");
+    return this.getCharacterRun(id);
+  }
+
+  async findActiveCharacterRun(nodeId: string): Promise<BotCharacterRun | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT run.id, run.assignment_id, run.machine_id, run.character_id, run.hunt_id, run.status, run.client_version,
+              CAST(run.loadout_json AS CHAR) AS loadout_json, CAST(run.route_snapshot_json AS CHAR) AS route_snapshot_json,
+              run.started_at, run.ended_at, run.notes
+         FROM bot_character_runs run
+         JOIN bot_machines machine ON machine.id = run.machine_id
+        WHERE machine.node_id = ? AND run.status = 'running'
+        ORDER BY run.started_at DESC, run.id DESC LIMIT 1`,
+      [nodeId]
+    );
+    return rows[0] ? mapCharacterRun(rows[0]) : null;
+  }
+
+  async ensureActiveCharacterRun(nodeId: string): Promise<BotCharacterRun | null> {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [assignments] = await connection.execute<RowDataPacket[]>(
+        `SELECT assignment.id, assignment.machine_id, assignment.character_id, assignment.hunt_id,
+                assignment.min_stamina_minutes, CAST(assignment.refill_config_json AS CHAR) AS refill_config_json
+           FROM bot_hunt_assignments assignment
+           JOIN bot_machines machine ON machine.id = assignment.machine_id
+          WHERE machine.node_id = ? AND assignment.status = 'active'
+          ORDER BY assignment.priority ASC, assignment.id DESC LIMIT 1 FOR UPDATE`,
+        [nodeId]
+      );
+      const assignment = assignments[0];
+      const [runningRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT run.id, run.assignment_id
+           FROM bot_character_runs run
+           JOIN bot_machines machine ON machine.id = run.machine_id
+          WHERE machine.node_id = ? AND run.status = 'running'
+          ORDER BY run.started_at DESC, run.id DESC FOR UPDATE`,
+        [nodeId]
+      );
+      const matchingRun = assignment
+        ? runningRows.find((row) => Number(row.assignment_id) === Number(assignment.id))
+        : undefined;
+      for (const row of runningRows) {
+        if (matchingRun && Number(row.id) === Number(matchingRun.id)) continue;
+        await connection.execute(
+          "UPDATE bot_character_runs SET status = 'completed', ended_at = CURRENT_TIMESTAMP, notes = CONCAT_WS(' ', notes, 'Encerrada automaticamente após mudança do assignment.') WHERE id = ?",
+          [row.id]
+        );
+      }
+      if (!assignment) {
+        await connection.commit();
+        return null;
+      }
+      let runId = matchingRun ? Number(matchingRun.id) : 0;
+      if (!runId) {
+        const routeSnapshot = JSON.stringify({
+          refill: assignment.refill_config_json ? JSON.parse(String(assignment.refill_config_json)) : null,
+          minStaminaMinutes: Number(assignment.min_stamina_minutes),
+          source: "assignment"
+        });
+        const [result] = await connection.execute<ResultSetHeader>(
+          `INSERT INTO bot_character_runs
+             (assignment_id, machine_id, character_id, hunt_id, route_snapshot_json, notes)
+           VALUES (?, ?, ?, ?, ?, 'Iniciada automaticamente pelo agente ao detectar o assignment ativo.')`,
+          [assignment.id, assignment.machine_id, assignment.character_id, assignment.hunt_id, routeSnapshot]
+        );
+        runId = result.insertId;
+      }
+      await connection.commit();
+      return this.getCharacterRun(runId);
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async updateAssignmentStatus(id: number, input: Record<string, unknown>): Promise<BotHuntAssignment> {
+    const status = enumValue(input.status, ["planned", "active", "paused", "disabled"] as const, "paused", "status");
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      "UPDATE bot_hunt_assignments SET status = ? WHERE id = ?",
+      [status, id]
+    );
+    if (result.affectedRows !== 1) throw new ValidationError("Assignment was not found.");
+    return this.getAssignment(id);
+  }
+
+  async listCharacterRunSamples(runId: number, limit = 200): Promise<readonly BotCharacterRunSample[]> {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(Math.floor(limit), 1_000)) : 200;
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id, run_id, observed_at, sample_type, decision_id, frame_path, danger_level,
+              CAST(state_json AS CHAR) AS state_json, CAST(action_json AS CHAR) AS action_json,
+              CAST(outcome_json AS CHAR) AS outcome_json, notes
+         FROM bot_character_run_samples WHERE run_id = ? ORDER BY observed_at DESC, id DESC LIMIT ${safeLimit}`,
+      [runId]
+    );
+    return rows.map(mapCharacterRunSample);
+  }
+
+  async createCharacterRunSample(input: Record<string, unknown>): Promise<BotCharacterRunSample> {
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `INSERT INTO bot_character_run_samples
+         (run_id, observed_at, sample_type, decision_id, frame_path, danger_level, state_json, action_json, outcome_json, notes)
+       VALUES (?, COALESCE(?, CURRENT_TIMESTAMP(3)), ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        requiredNumber(input.runId, "runId"), nullableDateTime(input.observedAt, "observedAt"),
+        enumValue(input.sampleType, ["perception", "decision", "action", "outcome", "danger", "telemetry", "route", "screen"] as const, "decision", "sampleType"),
+        nullableString(input.decisionId), nullableString(input.framePath),
+        enumValue(input.dangerLevel, ["none", "low", "medium", "high", "critical"] as const, "none", "dangerLevel"),
+        jsonValue(input.stateJson), jsonValue(input.actionJson), jsonValue(input.outcomeJson), nullableString(input.notes)
+      ]
+    );
+    return this.getCharacterRunSample(result.insertId);
   }
 
   async listHuntSkillRules(): Promise<readonly BotHuntSkillRule[]> {
@@ -275,7 +437,7 @@ export class ConfigurationRepository {
   async listHuntTelemetry(characterId?: number): Promise<readonly BotHuntTelemetry[]> {
     const where = characterId === undefined ? "" : " WHERE character_id = ?";
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, character_id, hunt_id, assignment_id, captured_at, duration_seconds, xp_rate_percent,
+      `SELECT id, character_id, hunt_id, assignment_id, run_id, captured_at, duration_seconds, xp_rate_percent,
               xp_gain, raw_xp_gain, xp_per_hour, raw_xp_per_hour, loot_value, supplies_value, profit,
               CAST(creatures_json AS CHAR) AS creatures_json, raw_text, source
          FROM bot_hunt_telemetry${where}
@@ -289,6 +451,23 @@ export class ConfigurationRepository {
     const characterId = requiredNumber(input.characterId, "characterId");
     const huntId = requiredNumber(input.huntId, "huntId");
     let assignmentId = optionalId(input.assignmentId, "assignmentId");
+    const runId = optionalId(input.runId, "runId");
+    if (runId !== null) {
+      const [runs] = await this.pool.execute<RowDataPacket[]>(
+        "SELECT assignment_id, character_id, hunt_id FROM bot_character_runs WHERE id = ? LIMIT 1",
+        [runId]
+      );
+      const run = runs[0];
+      if (!run) throw new ValidationError("Character run was not found.");
+      if (Number(run.character_id) !== characterId || Number(run.hunt_id) !== huntId) {
+        throw new ValidationError("Character run must belong to the selected character and hunt.");
+      }
+      const runAssignmentId = Number(run.assignment_id);
+      if (assignmentId !== null && assignmentId !== runAssignmentId) {
+        throw new ValidationError("Character run must belong to the selected assignment.");
+      }
+      assignmentId = runAssignmentId;
+    }
     if (assignmentId === null) {
       const [assignments] = await this.pool.execute<RowDataPacket[]>(
         "SELECT id FROM bot_hunt_assignments WHERE character_id = ? AND hunt_id = ? AND status = 'active' ORDER BY priority DESC, id DESC LIMIT 1",
@@ -303,12 +482,12 @@ export class ConfigurationRepository {
       : jsonString(input.creaturesJson);
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO bot_hunt_telemetry
-         (character_id, hunt_id, assignment_id, captured_at, duration_seconds, xp_rate_percent,
+         (character_id, hunt_id, assignment_id, run_id, captured_at, duration_seconds, xp_rate_percent,
           xp_gain, raw_xp_gain, xp_per_hour, raw_xp_per_hour, loot_value, supplies_value, profit,
           creatures_json, raw_text, source)
-       VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        characterId, huntId, assignmentId, nullableString(input.capturedAt),
+        characterId, huntId, assignmentId, runId, nullableDateTime(input.capturedAt, "capturedAt"),
         nullableNonNegativeInteger(input.durationSeconds, "durationSeconds"), xpRatePercent,
         nullableFiniteNumber(input.xpGain, "xpGain"), nullableFiniteNumber(input.rawXpGain, "rawXpGain"),
         nullableFiniteNumber(input.xpPerHour, "xpPerHour"), nullableFiniteNumber(input.rawXpPerHour, "rawXpPerHour"),
@@ -541,10 +720,31 @@ export class ConfigurationRepository {
 
   private async getAssignment(id: number): Promise<BotHuntAssignment> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      "SELECT id, machine_id, character_id, hunt_id, status, priority, notes FROM bot_hunt_assignments WHERE id = ?",
+      "SELECT id, machine_id, character_id, hunt_id, status, priority, min_stamina_minutes, CAST(refill_config_json AS CHAR) AS refill_config_json, notes FROM bot_hunt_assignments WHERE id = ?",
       [id]
     );
     return mapSingle(rows, mapAssignment);
+  }
+
+  private async getCharacterRun(id: number): Promise<BotCharacterRun> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id, assignment_id, machine_id, character_id, hunt_id, status, client_version,
+              CAST(loadout_json AS CHAR) AS loadout_json, CAST(route_snapshot_json AS CHAR) AS route_snapshot_json,
+              started_at, ended_at, notes FROM bot_character_runs WHERE id = ?`,
+      [id]
+    );
+    return mapSingle(rows, mapCharacterRun);
+  }
+
+  private async getCharacterRunSample(id: number): Promise<BotCharacterRunSample> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id, run_id, observed_at, sample_type, decision_id, frame_path, danger_level,
+              CAST(state_json AS CHAR) AS state_json, CAST(action_json AS CHAR) AS action_json,
+              CAST(outcome_json AS CHAR) AS outcome_json, notes
+         FROM bot_character_run_samples WHERE id = ?`,
+      [id]
+    );
+    return mapSingle(rows, mapCharacterRunSample);
   }
 
   private async getHuntSkillRule(id: number): Promise<BotHuntSkillRule> {
@@ -557,7 +757,7 @@ export class ConfigurationRepository {
 
   private async getHuntTelemetry(id: number): Promise<BotHuntTelemetry> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, character_id, hunt_id, assignment_id, captured_at, duration_seconds, xp_rate_percent,
+      `SELECT id, character_id, hunt_id, assignment_id, run_id, captured_at, duration_seconds, xp_rate_percent,
               xp_gain, raw_xp_gain, xp_per_hour, raw_xp_per_hour, loot_value, supplies_value, profit,
               CAST(creatures_json AS CHAR) AS creatures_json, raw_text, source
          FROM bot_hunt_telemetry WHERE id = ?`,
@@ -697,6 +897,41 @@ function mapAssignment(row: RowDataPacket): BotHuntAssignment {
     huntId: Number(row.hunt_id),
     status: row.status as BotHuntAssignment["status"],
     priority: Number(row.priority),
+    minStaminaMinutes: Number(row.min_stamina_minutes),
+    refillConfigJson: nullableRowString(row.refill_config_json),
+    notes: nullableRowString(row.notes)
+  };
+}
+
+function mapCharacterRun(row: RowDataPacket): BotCharacterRun {
+  return {
+    id: Number(row.id),
+    assignmentId: Number(row.assignment_id),
+    machineId: Number(row.machine_id),
+    characterId: Number(row.character_id),
+    huntId: Number(row.hunt_id),
+    status: row.status as BotCharacterRun["status"],
+    clientVersion: nullableRowString(row.client_version),
+    loadoutJson: nullableRowString(row.loadout_json),
+    routeSnapshotJson: nullableRowString(row.route_snapshot_json),
+    startedAt: new Date(row.started_at as string).toISOString(),
+    endedAt: row.ended_at ? new Date(row.ended_at as string).toISOString() : null,
+    notes: nullableRowString(row.notes)
+  };
+}
+
+function mapCharacterRunSample(row: RowDataPacket): BotCharacterRunSample {
+  return {
+    id: Number(row.id),
+    runId: Number(row.run_id),
+    observedAt: new Date(row.observed_at as string).toISOString(),
+    sampleType: row.sample_type as BotCharacterRunSample["sampleType"],
+    decisionId: nullableRowString(row.decision_id),
+    framePath: nullableRowString(row.frame_path),
+    dangerLevel: row.danger_level as BotCharacterRunSample["dangerLevel"],
+    stateJson: nullableRowString(row.state_json),
+    actionJson: nullableRowString(row.action_json),
+    outcomeJson: nullableRowString(row.outcome_json),
     notes: nullableRowString(row.notes)
   };
 }
@@ -724,6 +959,7 @@ function mapHuntTelemetry(row: RowDataPacket): BotHuntTelemetry {
     characterId: Number(row.character_id),
     huntId: Number(row.hunt_id),
     assignmentId: nullableRowNumber(row.assignment_id),
+    runId: nullableRowNumber(row.run_id),
     capturedAt: new Date(row.captured_at as string).toISOString(),
     durationSeconds: nullableRowNumber(row.duration_seconds),
     xpRatePercent: Number(row.xp_rate_percent),
@@ -924,6 +1160,24 @@ function nullableFiniteNumber(value: unknown, field: string): number | null {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) throw new ValidationError(`Field "${field}" must be a number.`);
   return parsed;
+}
+
+function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number, field: string): number {
+  const parsed = integerValue(value, fallback, field);
+  if (parsed < minimum || parsed > maximum) {
+    throw new ValidationError(`Field "${field}" must be between ${minimum} and ${maximum}.`);
+  }
+  return parsed;
+}
+
+function jsonValue(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "string") return jsonString(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    throw new ValidationError("Field must contain serializable JSON.");
+  }
 }
 
 function nullableDateTime(value: unknown, field: string): string | null {

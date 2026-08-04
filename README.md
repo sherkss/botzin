@@ -411,7 +411,7 @@ Quando o painel roda pelo Docker e o agente roda no host, `docker-compose.yml` m
 
 Configuração opcional:
 
-- `BOTZIN_DECISION_INTERVAL_MS`: intervalo entre ciclos, padrão `2000`;
+- A captura é contínua: o próximo frame começa assim que o anterior termina, sem intervalo artificial;
 - `BOTZIN_DECISION_LOG_PATH`: arquivo JSONL compartilhado pelo agente e pelo painel.
 
 ### Telemetria de hunt por personagem

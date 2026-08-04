@@ -12,6 +12,9 @@ import { createFrameSource } from "./perception/frame-source-factory.js";
 import { PerceptionPipeline } from "./perception/perception-pipeline.js";
 import { resolve } from "node:path";
 import { LiveDecisionStore, decisionFrom, errorDecision } from "./decision/live-decision-store.js";
+import { createMysqlPool } from "./database/mysql-pool.js";
+import { ConfigurationRepository } from "./database/configuration-repository.js";
+import { RuntimeRunCollector } from "./telemetry/runtime-run-collector.js";
 
 async function main(): Promise<void> {
   const config = loadRuntimeConfig();
@@ -28,6 +31,10 @@ async function main(): Promise<void> {
   const coordinator = new InMemoryCoordinator();
   const strategy = new PassiveObservationStrategy();
   const decisionStore = new LiveDecisionStore(resolve(config.decisionLogPath));
+  const pool = createMysqlPool(config);
+  const runCollector = new RuntimeRunCollector(
+    new ConfigurationRepository(pool), config.nodeId, resolve(config.runCaptureDir), config.runFrameIntervalMs
+  );
   const abortController = new AbortController();
   process.once("SIGINT", () => abortController.abort());
   process.once("SIGTERM", () => abortController.abort());
@@ -44,7 +51,7 @@ async function main(): Promise<void> {
         strategy: strategy.name,
         environmentReady: isEnvironmentReady(environment),
         environment,
-        decisionIntervalMs: config.decisionIntervalMs,
+        captureMode: "continuous-sequential",
         decisionLogPath: resolve(config.decisionLogPath),
         liveMonitor: "started"
       },
@@ -60,6 +67,7 @@ async function main(): Promise<void> {
       const commands = await strategy.plan(event);
       const decision = decisionFrom(event, strategy.name, commands);
       await decisionStore.append(decision);
+      runCollector.enqueue(perception, decision);
       console.log(JSON.stringify({
         type: "live-decision",
         observedAt: decision.observedAt,
@@ -73,19 +81,14 @@ async function main(): Promise<void> {
       await decisionStore.append(decision);
       console.error(JSON.stringify({ type: "live-decision-error", observedAt: decision.observedAt, error: decision.error }));
     }
-    await waitForNextCycle(config.decisionIntervalMs, abortController.signal);
+    await yieldToEventLoop();
   }
+  await runCollector.flush();
+  await pool.end();
 }
 
-async function waitForNextCycle(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return;
-  await new Promise<void>((resolvePromise) => {
-    const timeout = setTimeout(resolvePromise, milliseconds);
-    signal.addEventListener("abort", () => {
-      clearTimeout(timeout);
-      resolvePromise();
-    }, { once: true });
-  });
+async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
 }
 
 main().catch((error: unknown) => {

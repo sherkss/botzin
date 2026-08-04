@@ -72,6 +72,8 @@ export interface BotHuntAssignment {
   readonly huntId: number;
   readonly status: "planned" | "active" | "paused" | "disabled";
   readonly priority: number;
+  readonly minStaminaMinutes: number;
+  readonly refillConfigJson: string | null;
   readonly notes: string | null;
 }
 
@@ -95,6 +97,7 @@ export interface BotHuntTelemetry {
   readonly characterId: number;
   readonly huntId: number;
   readonly assignmentId: number | null;
+  readonly runId: number | null;
   readonly capturedAt: string;
   readonly durationSeconds: number | null;
   readonly xpRatePercent: number;
@@ -108,6 +111,35 @@ export interface BotHuntTelemetry {
   readonly creaturesJson: string | null;
   readonly rawText: string | null;
   readonly source: "session-analyser" | "ocr" | "manual" | "telemetry";
+}
+
+export interface BotCharacterRun {
+  readonly id: number;
+  readonly assignmentId: number;
+  readonly machineId: number;
+  readonly characterId: number;
+  readonly huntId: number;
+  readonly status: "running" | "completed" | "aborted";
+  readonly clientVersion: string | null;
+  readonly loadoutJson: string | null;
+  readonly routeSnapshotJson: string | null;
+  readonly startedAt: string;
+  readonly endedAt: string | null;
+  readonly notes: string | null;
+}
+
+export interface BotCharacterRunSample {
+  readonly id: number;
+  readonly runId: number;
+  readonly observedAt: string;
+  readonly sampleType: "perception" | "decision" | "action" | "outcome" | "danger" | "telemetry" | "route" | "screen";
+  readonly decisionId: string | null;
+  readonly framePath: string | null;
+  readonly dangerLevel: "none" | "low" | "medium" | "high" | "critical";
+  readonly stateJson: string | null;
+  readonly actionJson: string | null;
+  readonly outcomeJson: string | null;
+  readonly notes: string | null;
 }
 
 export interface BotLearningMethod {
@@ -205,6 +237,7 @@ export interface BotConfigurationSnapshot {
   readonly assignments: readonly BotHuntAssignment[];
   readonly huntSkillRules: readonly BotHuntSkillRule[];
   readonly huntTelemetry: readonly BotHuntTelemetry[];
+  readonly characterRuns: readonly BotCharacterRun[];
   readonly learningMethods: readonly BotLearningMethod[];
   readonly learningSources: readonly BotLearningSource[];
   readonly learningMethodSources: readonly BotLearningMethodSource[];

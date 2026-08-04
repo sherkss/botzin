@@ -122,6 +122,31 @@ enum FeedbackRating {
   unknown
 }
 
+enum CharacterRunStatus {
+  running
+  completed
+  aborted
+}
+
+enum CharacterRunSampleType {
+  perception
+  decision
+  action
+  outcome
+  danger
+  telemetry
+  route
+  screen
+}
+
+enum DangerLevel {
+  none
+  low
+  medium
+  high
+  critical
+}
+
 model ConfigUser {
   id           BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
   username     String         @unique(map: "uq_config_users_username") @db.VarChar(120)
@@ -165,6 +190,7 @@ model BotCharacter {
   learningMethods     BotLearningMethod[]
   huntTelemetry       BotHuntTelemetry[]
   clientSpellBindings BotClientSpellBinding[]
+  characterRuns       BotCharacterRun[]
 
   @@unique([accountId, name], map: "uq_bot_characters_account_name")
   @@map("bot_characters")
@@ -181,6 +207,7 @@ model BotMachine {
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamp(0)
   updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamp(0)
   assignments     BotHuntAssignment[]
+  characterRuns   BotCharacterRun[]
 
   @@map("bot_machines")
 }
@@ -199,6 +226,7 @@ model BotHunt {
   skillRules      BotHuntSkillRule[]
   learningMethods BotLearningMethod[]
   huntTelemetry   BotHuntTelemetry[]
+  characterRuns   BotCharacterRun[]
 
   @@map("bot_hunts")
 }
@@ -331,6 +359,8 @@ model BotHuntAssignment {
   huntId          BigInt                @map("hunt_id") @db.UnsignedBigInt
   status          AssignmentStatus      @default(planned)
   priority        Int                   @default(100)
+  minStaminaMinutes Int                 @default(2340) @map("min_stamina_minutes") @db.UnsignedInt
+  refillConfigJson Json?                @map("refill_config_json")
   notes           String?               @db.Text
   createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamp(0)
   updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamp(0)
@@ -340,9 +370,57 @@ model BotHuntAssignment {
   learningSession BotLearningSession[]
   feedback        BotDecisionFeedback[]
   huntTelemetry   BotHuntTelemetry[]
+  characterRuns   BotCharacterRun[]
 
   @@unique([machineId, characterId], map: "uq_bot_hunt_assignments_machine_character")
   @@map("bot_hunt_assignments")
+}
+
+model BotCharacterRun {
+  id                BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
+  assignmentId      BigInt             @map("assignment_id") @db.UnsignedBigInt
+  machineId         BigInt             @map("machine_id") @db.UnsignedBigInt
+  characterId       BigInt             @map("character_id") @db.UnsignedBigInt
+  huntId            BigInt             @map("hunt_id") @db.UnsignedBigInt
+  status            CharacterRunStatus @default(running)
+  clientVersion     String?            @map("client_version") @db.VarChar(40)
+  loadoutJson       Json?              @map("loadout_json")
+  routeSnapshotJson Json?              @map("route_snapshot_json")
+  startedAt         DateTime           @default(now()) @map("started_at") @db.Timestamp(0)
+  endedAt           DateTime?          @map("ended_at") @db.Timestamp(0)
+  notes             String?            @db.Text
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamp(0)
+  assignment        BotHuntAssignment  @relation(fields: [assignmentId], references: [id], onDelete: Cascade, map: "fk_bot_character_runs_assignment")
+  machine           BotMachine         @relation(fields: [machineId], references: [id], onDelete: Cascade, map: "fk_bot_character_runs_machine")
+  character         BotCharacter       @relation(fields: [characterId], references: [id], onDelete: Cascade, map: "fk_bot_character_runs_character")
+  hunt              BotHunt            @relation(fields: [huntId], references: [id], onDelete: Restrict, map: "fk_bot_character_runs_hunt")
+  samples           BotCharacterRunSample[]
+  huntTelemetry     BotHuntTelemetry[]
+
+  @@index([characterId, startedAt], map: "idx_bot_character_runs_character_time")
+  @@index([machineId, status], map: "idx_bot_character_runs_machine_status")
+  @@map("bot_character_runs")
+}
+
+model BotCharacterRunSample {
+  id          BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
+  runId       BigInt                 @map("run_id") @db.UnsignedBigInt
+  observedAt  DateTime               @default(now()) @map("observed_at") @db.Timestamp(3)
+  sampleType  CharacterRunSampleType @map("sample_type")
+  decisionId  String?                @map("decision_id") @db.VarChar(80)
+  framePath   String?                @map("frame_path") @db.VarChar(500)
+  dangerLevel DangerLevel            @default(none) @map("danger_level")
+  stateJson   Json?                  @map("state_json")
+  actionJson  Json?                  @map("action_json")
+  outcomeJson Json?                  @map("outcome_json")
+  notes       String?                @db.Text
+  createdAt   DateTime               @default(now()) @map("created_at") @db.Timestamp(0)
+  run         BotCharacterRun        @relation(fields: [runId], references: [id], onDelete: Cascade, map: "fk_bot_character_run_samples_run")
+
+  @@index([runId, observedAt], map: "idx_bot_character_run_samples_run_time")
+  @@index([sampleType, dangerLevel], map: "idx_bot_character_run_samples_type_danger")
+  @@map("bot_character_run_samples")
 }
 
 model BotHuntTelemetry {
@@ -350,6 +428,7 @@ model BotHuntTelemetry {
   characterId     BigInt              @map("character_id") @db.UnsignedBigInt
   huntId          BigInt              @map("hunt_id") @db.UnsignedBigInt
   assignmentId    BigInt?             @map("assignment_id") @db.UnsignedBigInt
+  runId           BigInt?             @map("run_id") @db.UnsignedBigInt
   capturedAt      DateTime            @default(now()) @map("captured_at") @db.Timestamp(0)
   durationSeconds Int?                @map("duration_seconds") @db.UnsignedInt
   xpRatePercent   Int                 @default(150) @map("xp_rate_percent") @db.UnsignedInt
@@ -367,6 +446,7 @@ model BotHuntTelemetry {
   character       BotCharacter        @relation(fields: [characterId], references: [id], onDelete: Cascade, map: "fk_bot_hunt_telemetry_character")
   hunt            BotHunt             @relation(fields: [huntId], references: [id], onDelete: Restrict, map: "fk_bot_hunt_telemetry_hunt")
   assignment      BotHuntAssignment?  @relation(fields: [assignmentId], references: [id], onDelete: SetNull, map: "fk_bot_hunt_telemetry_assignment")
+  run             BotCharacterRun?    @relation(fields: [runId], references: [id], onDelete: SetNull, map: "fk_bot_hunt_telemetry_run")
 
   @@index([characterId, capturedAt], map: "idx_bot_hunt_telemetry_character_time")
   @@index([huntId, capturedAt], map: "idx_bot_hunt_telemetry_hunt_time")

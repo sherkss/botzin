@@ -203,6 +203,8 @@ CREATE TABLE IF NOT EXISTS bot_hunt_assignments (
   hunt_id BIGINT UNSIGNED NOT NULL,
   status ENUM('planned', 'active', 'paused', 'disabled') NOT NULL DEFAULT 'planned',
   priority INT NOT NULL DEFAULT 100,
+  min_stamina_minutes INT UNSIGNED NOT NULL DEFAULT 2340,
+  refill_config_json JSON NULL,
   notes TEXT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -217,6 +219,49 @@ CREATE TABLE IF NOT EXISTS bot_hunt_assignments (
   CONSTRAINT fk_bot_hunt_assignments_hunt
     FOREIGN KEY (hunt_id) REFERENCES bot_hunts (id)
     ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS bot_character_runs (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  assignment_id BIGINT UNSIGNED NOT NULL,
+  machine_id BIGINT UNSIGNED NOT NULL,
+  character_id BIGINT UNSIGNED NOT NULL,
+  hunt_id BIGINT UNSIGNED NOT NULL,
+  status ENUM('running', 'completed', 'aborted') NOT NULL DEFAULT 'running',
+  client_version VARCHAR(40) NULL,
+  loadout_json JSON NULL,
+  route_snapshot_json JSON NULL,
+  started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ended_at TIMESTAMP NULL,
+  notes TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_bot_character_runs_character_time (character_id, started_at),
+  KEY idx_bot_character_runs_machine_status (machine_id, status),
+  CONSTRAINT fk_bot_character_runs_assignment FOREIGN KEY (assignment_id) REFERENCES bot_hunt_assignments (id) ON DELETE CASCADE,
+  CONSTRAINT fk_bot_character_runs_machine FOREIGN KEY (machine_id) REFERENCES bot_machines (id) ON DELETE CASCADE,
+  CONSTRAINT fk_bot_character_runs_character FOREIGN KEY (character_id) REFERENCES bot_characters (id) ON DELETE CASCADE,
+  CONSTRAINT fk_bot_character_runs_hunt FOREIGN KEY (hunt_id) REFERENCES bot_hunts (id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS bot_character_run_samples (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  run_id BIGINT UNSIGNED NOT NULL,
+  observed_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  sample_type ENUM('perception', 'decision', 'action', 'outcome', 'danger', 'telemetry', 'route', 'screen') NOT NULL,
+  decision_id VARCHAR(80) NULL,
+  frame_path VARCHAR(500) NULL,
+  danger_level ENUM('none', 'low', 'medium', 'high', 'critical') NOT NULL DEFAULT 'none',
+  state_json JSON NULL,
+  action_json JSON NULL,
+  outcome_json JSON NULL,
+  notes TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_bot_character_run_samples_run_time (run_id, observed_at),
+  KEY idx_bot_character_run_samples_type_danger (sample_type, danger_level),
+  CONSTRAINT fk_bot_character_run_samples_run FOREIGN KEY (run_id) REFERENCES bot_character_runs (id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS bot_hunt_skill_rules (
@@ -249,6 +294,7 @@ CREATE TABLE IF NOT EXISTS bot_hunt_telemetry (
   character_id BIGINT UNSIGNED NOT NULL,
   hunt_id BIGINT UNSIGNED NOT NULL,
   assignment_id BIGINT UNSIGNED NULL,
+  run_id BIGINT UNSIGNED NULL,
   captured_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   duration_seconds INT UNSIGNED NULL,
   xp_rate_percent INT UNSIGNED NOT NULL DEFAULT 150,
@@ -274,6 +320,9 @@ CREATE TABLE IF NOT EXISTS bot_hunt_telemetry (
     ON DELETE RESTRICT,
   CONSTRAINT fk_bot_hunt_telemetry_assignment
     FOREIGN KEY (assignment_id) REFERENCES bot_hunt_assignments (id)
+    ON DELETE SET NULL,
+  CONSTRAINT fk_bot_hunt_telemetry_run
+    FOREIGN KEY (run_id) REFERENCES bot_character_runs (id)
     ON DELETE SET NULL
 );
 

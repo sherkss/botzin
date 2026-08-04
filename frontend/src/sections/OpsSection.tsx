@@ -17,10 +17,40 @@ export function OpsSection({ state, onRefresh }: Props) {
         Operacoes
       </h2>
       <LiveDecisionCard />
+      <CharacterRunCard state={state} onRefresh={onRefresh} />
       <HuntTelemetryCard state={state} onRefresh={onRefresh} />
       <AssignmentCard state={state} onRefresh={onRefresh} />
       <HuntSkillRuleCard state={state} onRefresh={onRefresh} />
     </section>
+  );
+}
+
+function CharacterRunCard({ state, onRefresh }: Props) {
+  const running = state.characterRuns.filter((run) => run.status === "running");
+  useEffect(() => {
+    const timer = window.setInterval(() => void onRefresh(), 5_000);
+    return () => window.clearInterval(timer);
+  }, [onRefresh]);
+
+  return (
+    <CollapsibleCard icon="C" iconKind="method" title="Coleta automática por char" wide>
+      <p className="text-[12px] text-muted">
+        Não precisa iniciar manualmente. Quando o agente recebe imagem em uma máquina com assignment ativo, ele abre a run e começa a coletar. Ao pausar ou desativar o assignment, a run é encerrada automaticamente.
+      </p>
+
+      {running.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {running.map((run) => (
+            <div key={run.id} className="flex flex-wrap items-center gap-3 rounded-[6px] border border-border bg-bg p-3 text-[12px]">
+              <span className="font-semibold">Run #{run.id}</span>
+              <span className="text-muted">Char {run.characterId} • Hunt {run.huntId} • {formatDecisionTime(run.startedAt)}</span>
+              <span className="ml-auto text-icon-skill">coletando</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {running.length === 0 && <p className="mt-3 text-[12px] text-muted">Nenhuma run ativa neste momento.</p>}
+    </CollapsibleCard>
   );
 }
 
@@ -29,6 +59,7 @@ function HuntTelemetryCard({ state, onRefresh }: Props) {
   const [huntId, setHuntId] = useState("");
   const [xpRatePercent, setXpRatePercent] = useState("150");
   const [rawText, setRawText] = useState("");
+  const [runId, setRunId] = useState("");
   const [message, setMessage] = useState("Cole os dados copiados do Hunting Session Analyser.");
   const [busy, setBusy] = useState(false);
   const selectedCharacterId = Number(characterId);
@@ -44,6 +75,7 @@ function HuntTelemetryCard({ state, onRefresh }: Props) {
         characterId: Number(characterId),
         huntId: Number(huntId),
         xpRatePercent: Number(xpRatePercent),
+        runId: runId ? Number(runId) : undefined,
         rawText
       });
       setRawText("");
@@ -59,7 +91,7 @@ function HuntTelemetryCard({ state, onRefresh }: Props) {
   return (
     <CollapsibleCard icon="T" iconKind="method" title="Telemetria de hunt por char" wide>
       <form onSubmit={(event) => void submit(event)}>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
           <Field label="Personagem">
             <Select value={characterId} onChange={(event) => setCharacterId(event.target.value)} required>
               <option value="">Selecionar...</option>
@@ -78,6 +110,14 @@ function HuntTelemetryCard({ state, onRefresh }: Props) {
               <option value="150">150% stamina verde</option>
               <option value="225">225% stamina + boost</option>
               <option value="300">300%</option>
+            </Select>
+          </Field>
+          <Field label="Execução ativa">
+            <Select value={runId} onChange={(event) => setRunId(event.target.value)}>
+              <option value="">Sem vínculo</option>
+              {state.characterRuns.filter((run) => run.status === "running").map((run) => (
+                <option key={run.id} value={run.id}>Run #{run.id}</option>
+              ))}
             </Select>
           </Field>
           <Field label="Hunting Session Analyser" className="sm:col-span-3">
@@ -264,6 +304,16 @@ function formatDecisionTime(value: string): string {
 
 function AssignmentCard({ state, onRefresh }: Props) {
   const { handleSubmit, busy, msg } = useFormSubmit({ url: "/api/assignments", onSuccess: onRefresh });
+  const [statusMessage, setStatusMessage] = useState("");
+  const changeStatus = async (id: number, status: "active" | "paused" | "disabled"): Promise<void> => {
+    try {
+      await apiPost(`/api/assignments/${id}/status`, { status });
+      setStatusMessage(`Assignment #${id}: ${status}.`);
+      await onRefresh();
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Falha ao alterar assignment.");
+    }
+  };
   return (
     <CollapsibleCard icon="A" iconKind="assign" title="Atribuicao de hunt" wide>
       <FormBody onSubmit={handleSubmit} busy={busy} msg={msg} submitLabel="Salvar atribuicao">
@@ -295,11 +345,35 @@ function AssignmentCard({ state, onRefresh }: Props) {
             </Select>
           </Field>
           <Field label="Prioridade"><Input name="priority" type="number" defaultValue="100" /></Field>
+          <Field label="Parar abaixo de stamina (min)"><Input name="minStaminaMinutes" type="number" min="0" max="2520" defaultValue="2340" /></Field>
+          <Field label="Configuração de refill JSON" className="sm:col-span-3">
+            <Textarea name="refillConfigJson" rows={4} placeholder='{"capacityBelow":200,"supplies":{"ultimate mana potion":{"returnAt":300,"buyTo":1200}},"depositLoot":true}' />
+          </Field>
           <Field label="Notas" className="sm:col-span-3"><Textarea name="notes" /></Field>
         </div>
       </FormBody>
+      <div className="mt-4 space-y-2">
+        {state.assignments.map((assignment) => {
+          const character = state.characters.find((item) => item.id === assignment.characterId)?.name ?? assignment.characterId;
+          const hunt = state.hunts.find((item) => item.id === assignment.huntId)?.name ?? assignment.huntId;
+          return (
+            <div key={assignment.id} className="flex flex-wrap items-center gap-2 rounded border border-border p-2 text-[12px]">
+              <span className="font-semibold">{character} — {hunt}</span>
+              <span className="text-muted">{assignment.status} • stamina mínima {formatStamina(assignment.minStaminaMinutes)}</span>
+              <button type="button" onClick={() => void changeStatus(assignment.id, "active")} className="ml-auto rounded border border-border px-2 py-1">Ativar</button>
+              <button type="button" onClick={() => void changeStatus(assignment.id, "paused")} className="rounded border border-border px-2 py-1">Pausar</button>
+              <button type="button" onClick={() => void changeStatus(assignment.id, "disabled")} className="rounded border border-border px-2 py-1 text-icon-machine">Desativar</button>
+            </div>
+          );
+        })}
+      </div>
+      {statusMessage && <p className="mt-2 text-[12px] text-muted">{statusMessage}</p>}
     </CollapsibleCard>
   );
+}
+
+function formatStamina(minutes: number): string {
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
 }
 
 function HuntSkillRuleCard({ state, onRefresh }: Props) {

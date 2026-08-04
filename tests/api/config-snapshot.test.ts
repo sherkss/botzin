@@ -23,7 +23,7 @@ describe("GET /api/config", () => {
 
     const expected = [
       "accounts", "characters", "machines", "hunts", "skills",
-      "assignments", "huntSkillRules", "huntTelemetry", "learningMethods", "learningSources",
+      "assignments", "huntSkillRules", "huntTelemetry", "characterRuns", "learningMethods", "learningSources",
       "learningMethodSources", "learningSessions", "learningEvents", "decisionFeedback"
     ];
     for (const key of expected) {

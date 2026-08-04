@@ -1,11 +1,15 @@
 import type { GameEntity } from "../core/game-entity.js";
 import type { EntityDetector } from "./entity-detector.js";
 import type { FrameSource } from "./frame-source.js";
+import type { ScreenFrame } from "../core/frame.js";
+import type { CharacterOperationObservation } from "../decision/hunt-operation-policy.js";
 
 export interface PerceptionResult {
   readonly sourceComputerId: string;
   readonly capturedAt: string;
   readonly entities: readonly GameEntity[];
+  readonly frame: ScreenFrame;
+  readonly operationObservation?: CharacterOperationObservation;
 }
 
 export class PerceptionPipeline {
@@ -21,7 +25,8 @@ export class PerceptionPipeline {
     return {
       sourceComputerId: frame.sourceComputerId,
       capturedAt: frame.capturedAt,
-      entities
+      entities,
+      frame
     };
   }
 }

@@ -64,6 +64,8 @@ export interface Assignment {
   huntId: number;
   status: string;
   priority?: number;
+  minStaminaMinutes: number;
+  refillConfigJson: string | null;
 }
 
 export interface HuntSkillRule {
@@ -78,6 +80,7 @@ export interface HuntTelemetry {
   characterId: number;
   huntId: number;
   assignmentId: number | null;
+  runId: number | null;
   capturedAt: string;
   durationSeconds: number | null;
   xpRatePercent: number;
@@ -90,6 +93,21 @@ export interface HuntTelemetry {
   profit: number | null;
   creaturesJson: string | null;
   source: string;
+}
+
+export interface CharacterRun {
+  id: number;
+  assignmentId: number;
+  machineId: number;
+  characterId: number;
+  huntId: number;
+  status: "running" | "completed" | "aborted";
+  clientVersion: string | null;
+  loadoutJson: string | null;
+  routeSnapshotJson: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  notes: string | null;
 }
 
 export interface CatalogPage<T> {
@@ -285,6 +303,7 @@ export interface AppState {
   assignments: Assignment[];
   huntSkillRules: HuntSkillRule[];
   huntTelemetry: HuntTelemetry[];
+  characterRuns: CharacterRun[];
   learningMethods: LearningMethod[];
   learningSources: LearningSource[];
   learningMethodSources: LearningMethodSource[];

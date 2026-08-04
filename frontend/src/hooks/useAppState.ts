@@ -12,6 +12,7 @@ const EMPTY: AppState = {
   assignments: [],
   huntSkillRules: [],
   huntTelemetry: [],
+  characterRuns: [],
   learningMethods: [],
   learningSources: [],
   learningMethodSources: [],
