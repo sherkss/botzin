@@ -11,6 +11,7 @@ import {
   type TranscriptSegment
 } from "./knowledge-store.js";
 import { classifySourceFreshness, extractGameVersion } from "./source-freshness.js";
+import { KnowledgeFailureQueue, type KnowledgeFailureStage } from "./knowledge-failure-queue.js";
 
 interface VideoInfo {
   readonly id?: string;
@@ -46,17 +47,36 @@ interface IngestOptions {
   readonly currentGameVersion: string | null;
   readonly legacyBefore: string | null;
   readonly metadataOnly: boolean;
+  readonly retryFailed: boolean;
+}
+
+interface DetectedDownloadFailure {
+  readonly videoId: string;
+  readonly stage: "metadata" | "subtitle";
+  readonly reason: string;
 }
 
 const defaultKnowledgeDir = resolve(fileURLToPath(new URL("../../storage/knowledge", import.meta.url)));
+const YT_DLP_RUNTIME_ARGUMENTS = ["--js-runtimes", "node"] as const;
+const YT_DLP_RATE_LIMIT_ARGUMENTS = [
+  "--sleep-requests", "0.75",
+  "--sleep-subtitles", "5",
+  "--extractor-retries", "10",
+  "--retries", "10",
+  "--retry-sleep", "http:exp=5:120"
+] as const;
 
 async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
-  if (!options.indexOnly) await ensureTool(options.pythonCommand, "yt_dlp", ["--version"]);
-  if (!options.indexOnly && options.whisperMissing) await ensureTool(options.pythonCommand, "whisper", ["--help"]);
+  if (!options.indexOnly) await ensurePythonModule(options.pythonCommand, "yt_dlp");
+  if (!options.indexOnly && options.whisperMissing) {
+    await ensurePythonModule(options.pythonCommand, "whisper");
+    await ensureExecutable("ffmpeg", ["-version"], "FFmpeg não está disponível no PATH. Instale o FFmpeg e reabra o terminal (Chocolatey como Administrador: choco install ffmpeg -y).");
+  }
 
   const rawDir = join(options.knowledgeDir, "raw");
   await mkdir(rawDir, { recursive: true });
+  const failureQueue = await KnowledgeFailureQueue.open(join(options.knowledgeDir, "failed-videos.json"));
 
   const store = new KnowledgeStore(options.knowledgeDir);
   if (options.indexOnly) {
@@ -68,25 +88,41 @@ async function main(): Promise<void> {
   }
 
   const manifestDocuments: KnowledgeDocument[] = [];
-  for (const playlist of options.playlists) {
-    console.log(`[knowledge] Baixando metadados e legendas: ${playlist}`);
-    if (options.metadataOnly && isYoutubeChannelUrl(playlist)) {
-      manifestDocuments.push(...await documentsFromChannelManifest(playlist, options));
-      continue;
+  const retryIds = new Set(options.retryFailed ? failureQueue.list().map((failure) => failure.videoId) : []);
+  const detectedRetryFailures = new Set<string>();
+  if (options.retryFailed) {
+    if (retryIds.size === 0) {
+      console.log("[knowledge] A fila de falhas está vazia.");
+      return;
     }
-    const subtitleArguments = options.metadataOnly
-      ? []
-      : ["--write-subs", "--write-auto-subs", "--sub-langs", "pt-orig,pt", "--sub-format", "vtt"];
-    await run(options.pythonCommand, [
-      "-m", "yt_dlp", "--ignore-errors", "--skip-download", "--write-info-json",
-      ...(options.metadataOnly ? ["--flat-playlist"] : []), ...subtitleArguments,
-      "--no-overwrites", "--output", join(rawDir, "%(playlist_id)s", "%(playlist_index)03d-%(id)s.%(ext)s"),
-      playlist
-    ]);
+    console.log(`[knowledge] Reprocessando somente ${retryIds.size} vídeo(s) da fila de falhas.`);
+    for (const failure of failureQueue.list()) {
+      console.log(`[knowledge] Retry ${failure.videoId} (${failure.stage}, tentativa ${failure.attempts + 1})`);
+      const detected = await downloadMetadataAndSubtitles(failure.url, join(rawDir, "retry", "%(id)s.%(ext)s"), options);
+      for (const item of detected) detectedRetryFailures.add(item.videoId);
+      await recordDetectedFailures(failureQueue, detected);
+    }
+  } else {
+    for (const playlist of options.playlists) {
+      console.log(`[knowledge] Baixando metadados e legendas: ${playlist}`);
+      if (options.metadataOnly && isYoutubeChannelUrl(playlist)) {
+        manifestDocuments.push(...await documentsFromChannelManifest(playlist, options));
+        continue;
+      }
+      const detected = await downloadMetadataAndSubtitles(
+        playlist,
+        join(rawDir, "%(playlist_id)s", "%(playlist_index)03d-%(id)s.%(ext)s"),
+        options
+      );
+      await recordDetectedFailures(failureQueue, detected);
+    }
   }
 
-  const infoPaths = await listFilesRecursive(rawDir, ".info.json");
-  if (infoPaths.length === 0) {
+  const allInfoPaths = await listFilesRecursive(rawDir, ".info.json");
+  const infoPaths = options.retryFailed
+    ? allInfoPaths.filter((path) => [...retryIds].some((videoId) => basename(path).includes(videoId)))
+    : allInfoPaths;
+  if (infoPaths.length === 0 && !options.retryFailed) {
     throw new Error("Nenhum metadado foi baixado. Verifique a rede, o yt-dlp e as URLs das playlists.");
   }
 
@@ -97,25 +133,75 @@ async function main(): Promise<void> {
   let skipped = 0;
   for (const infoPath of infoPaths) {
     if (basename(infoPath).startsWith("000-")) continue;
-    const document = await documentFromVideo(infoPath, options);
-    if (!document) {
+    let info: VideoInfo | null = null;
+    try {
+      info = JSON.parse(await readFile(infoPath, "utf8")) as VideoInfo;
+      const document = await documentFromVideo(infoPath, options);
+      if (!document) {
+        skipped += 1;
+        if (info.id) await failureQueue.resolve(info.id);
+        continue;
+      }
+      if (!documentsById.has(document.videoId)) documentsById.set(document.videoId, document);
+      await failureQueue.resolve(document.videoId);
+    } catch (error) {
       skipped += 1;
+      const videoId = info?.id ?? videoIdFromPath(infoPath);
+      if (videoId) {
+        await failureQueue.record({
+          videoId,
+          url: info?.webpage_url ?? info?.original_url,
+          title: info?.title ?? null,
+          infoPath,
+          stage: failureStage(error),
+          reason: error instanceof Error ? error.message : String(error)
+        });
+        console.warn(`[knowledge] Falha registrada: ${videoId} — ${error instanceof Error ? error.message : String(error)}`);
+      }
       continue;
     }
-    if (!documentsById.has(document.videoId)) documentsById.set(document.videoId, document);
+  }
+
+  if (options.retryFailed) {
+    for (const videoId of retryIds) {
+      if (infoPaths.some((path) => basename(path).includes(videoId))) continue;
+      if (detectedRetryFailures.has(videoId)) continue;
+      await failureQueue.record({ videoId, stage: "metadata", reason: "O retry não gerou um arquivo .info.json para o vídeo." });
+    }
   }
 
   const documents = [...documentsById.values()];
   for (const document of documents) await store.saveDocument(document);
-  const index = await store.writeIndex(documents);
+  const documentsForIndex = options.retryFailed ? await store.readDocuments() : documents;
+  const index = await store.writeIndex(documentsForIndex);
 
   console.log(`[knowledge] Concluído: ${index.documents} documentos, ${index.chunks.length} trechos, ${skipped} vídeos sem texto.`);
+  console.log(`[knowledge] Fila pendente: ${failureQueue.list().length} vídeo(s) em ${join(options.knowledgeDir, "failed-videos.json")}.`);
   console.log(`[knowledge] Arquivos: ${options.knowledgeDir}`);
+}
+
+async function downloadMetadataAndSubtitles(url: string, output: string, options: IngestOptions): Promise<readonly DetectedDownloadFailure[]> {
+  const subtitleArguments = options.metadataOnly
+    ? []
+    : ["--write-subs", "--write-auto-subs", "--sub-langs", "pt-orig,pt", "--sub-format", "vtt"];
+  return runYtDlp(options.pythonCommand, [
+    "-m", "yt_dlp", ...YT_DLP_RUNTIME_ARGUMENTS, ...YT_DLP_RATE_LIMIT_ARGUMENTS,
+    "--ignore-errors", "--skip-download", "--write-info-json",
+    ...(options.metadataOnly ? ["--flat-playlist"] : []), ...subtitleArguments,
+    "--no-overwrites", "--output", output, url
+  ]);
+}
+
+async function recordDetectedFailures(queue: KnowledgeFailureQueue, failures: readonly DetectedDownloadFailure[]): Promise<void> {
+  for (const failure of failures) {
+    await queue.record({ videoId: failure.videoId, stage: failure.stage, reason: failure.reason });
+  }
 }
 
 async function documentsFromChannelManifest(url: string, options: IngestOptions): Promise<KnowledgeDocument[]> {
   const output = await runCapture(options.pythonCommand, [
-    "-m", "yt_dlp", "--flat-playlist", "--dump-single-json", "--ignore-errors", url
+    "-m", "yt_dlp", ...YT_DLP_RUNTIME_ARGUMENTS, ...YT_DLP_RATE_LIMIT_ARGUMENTS,
+    "--flat-playlist", "--dump-single-json", "--ignore-errors", url
   ]);
   const manifest = JSON.parse(output) as FlatPlaylistInfo;
   return (manifest.entries ?? []).flatMap((entry) => {
@@ -206,7 +292,8 @@ async function transcribeWithWhisper(
   await mkdir(audioDir, { recursive: true });
   await mkdir(whisperDir, { recursive: true });
   await run(options.pythonCommand, [
-    "-m", "yt_dlp", "--extract-audio", "--audio-format", "mp3", "--no-overwrites",
+    "-m", "yt_dlp", ...YT_DLP_RUNTIME_ARGUMENTS, ...YT_DLP_RATE_LIMIT_ARGUMENTS,
+    "--extract-audio", "--audio-format", "mp3", "--no-overwrites",
     "--output", join(audioDir, `${info.id}.%(ext)s`), url
   ]);
   const audio = (await listFilesRecursive(audioDir, ".mp3")).find((path) => basename(path, extname(path)) === info.id);
@@ -260,8 +347,19 @@ function parseOptions(args: readonly string[]): IngestOptions {
     indexOnly: args.includes("--index-only"),
     currentGameVersion: valueAfter("--current-version") ?? process.env.BOTZIN_TIBIA_VERSION ?? null,
     legacyBefore: valueAfter("--legacy-before") ?? process.env.BOTZIN_KNOWLEDGE_LEGACY_BEFORE ?? null,
-    metadataOnly: args.includes("--metadata-only")
+    metadataOnly: args.includes("--metadata-only"),
+    retryFailed: args.includes("--retry-failed")
   };
+}
+
+function videoIdFromPath(path: string): string | null {
+  return basename(path).match(/([A-Za-z0-9_-]{11})(?=\.info\.json$)/)?.[1] ?? null;
+}
+
+function failureStage(error: unknown): KnowledgeFailureStage {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (message.includes("whisper") || message.includes("audio") || message.includes("ffmpeg")) return "transcription";
+  return "document";
 }
 
 function videoPublishedAt(info: VideoInfo): string | null {
@@ -280,17 +378,29 @@ function isSupportedTibiaHuntLevel(title: string): boolean {
   return /\b(?:EK|ED|MS|RP|EM)\s*\d{1,6}\b/i.test(title);
 }
 
-async function ensureTool(command: string, module: string, args: readonly string[]): Promise<void> {
+async function ensurePythonModule(command: string, module: string): Promise<void> {
   try {
-    await run(command, ["-m", module, ...args], false);
+    await run(command, ["-c", `import ${module}`], false);
   } catch {
     throw new Error(`Módulo Python "${module}" não está disponível. Instale com: python -m pip install ${module === "yt_dlp" ? "yt-dlp" : "openai-whisper"}`);
   }
 }
 
+async function ensureExecutable(command: string, args: readonly string[], errorMessage: string): Promise<void> {
+  try {
+    await run(command, args, false);
+  } catch {
+    throw new Error(errorMessage);
+  }
+}
+
+function subprocessEnvironment(): NodeJS.ProcessEnv {
+  return { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" };
+}
+
 async function run(command: string, args: readonly string[], showOutput = true): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn(command, args, { stdio: showOutput ? "inherit" : "ignore", windowsHide: true });
+    const child = spawn(command, args, { stdio: showOutput ? "inherit" : "ignore", windowsHide: true, env: subprocessEnvironment() });
     child.on("error", reject);
     child.on("exit", (code) => code === 0 ? resolvePromise() : reject(new Error(`${command} terminou com código ${code ?? "desconhecido"}.`)));
   });
@@ -298,7 +408,7 @@ async function run(command: string, args: readonly string[], showOutput = true):
 
 async function runCapture(command: string, args: readonly string[]): Promise<string> {
   return new Promise<string>((resolvePromise, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, env: subprocessEnvironment() });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
@@ -307,6 +417,48 @@ async function runCapture(command: string, args: readonly string[]): Promise<str
     child.on("exit", (code) => {
       if (code === 0) resolvePromise(Buffer.concat(stdout).toString("utf8"));
       else reject(new Error(`${command} terminou com código ${code ?? "desconhecido"}: ${Buffer.concat(stderr).toString("utf8").slice(-1000)}`));
+    });
+  });
+}
+
+async function runYtDlp(command: string, args: readonly string[]): Promise<readonly DetectedDownloadFailure[]> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, env: subprocessEnvironment() });
+    const failures = new Map<string, DetectedDownloadFailure>();
+    let currentVideoId: string | null = null;
+    let stdoutRemainder = "";
+    let stderrRemainder = "";
+
+    const inspectLine = (rawLine: string): void => {
+      const line = rawLine.replace(/\u001b\[[0-9;]*m/g, "");
+      const identity = line.match(/\[youtube\]\s+([A-Za-z0-9_-]{11}):/);
+      if (identity) currentVideoId = identity[1];
+      const directError = line.match(/ERROR:\s*\[youtube\]\s+([A-Za-z0-9_-]{11}):\s*(.+)/i);
+      if (directError) {
+        failures.set(directError[1], { videoId: directError[1], stage: "metadata", reason: directError[2].trim() });
+      } else if (currentVideoId && /WARNING:.*(?:subtitle|subtitles).*?(?:HTTP Error|Unable to download)/i.test(line)) {
+        failures.set(currentVideoId, { videoId: currentVideoId, stage: "subtitle", reason: line.trim() });
+      }
+    };
+    const consume = (chunk: Buffer, stderr: boolean): void => {
+      const value = (stderr ? stderrRemainder : stdoutRemainder) + chunk.toString("utf8");
+      const lines = value.split(/\r?\n/);
+      const remainder = lines.pop() ?? "";
+      if (stderr) stderrRemainder = remainder; else stdoutRemainder = remainder;
+      for (const line of lines) inspectLine(line);
+      (stderr ? process.stderr : process.stdout).write(chunk);
+    };
+    child.stdout.on("data", (chunk: Buffer) => consume(chunk, false));
+    child.stderr.on("data", (chunk: Buffer) => consume(chunk, true));
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (stdoutRemainder) inspectLine(stdoutRemainder);
+      if (stderrRemainder) inspectLine(stderrRemainder);
+      if (code !== 0 && failures.size === 0) {
+        reject(new Error(`${command} terminou com código ${code ?? "desconhecido"}.`));
+        return;
+      }
+      resolvePromise([...failures.values()]);
     });
   });
 }

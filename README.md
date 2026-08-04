@@ -356,6 +356,36 @@ Para recriar somente o índice a partir dos arquivos já baixados:
 npm run knowledge:reindex
 ```
 
+Falhas individuais são mantidas em `storage/knowledge/failed-videos.json`. Depois de aguardar o fim de um limite temporário do YouTube, reprocesse somente essa fila:
+
+```powershell
+npm run knowledge:retry-failed
+```
+
+### Preparação visual de vídeos de hunts
+
+Para baixar um vídeo e extrair um quadro a cada dois segundos:
+
+```powershell
+npm run knowledge:video:prepare -- --url "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+Para uma playlist ou canal, informe sempre um limite explícito (o padrão seguro é `1`):
+
+```powershell
+npm run knowledge:video:prepare -- --url "URL_DA_PLAYLIST" --limit 10 --frame-interval 2 --max-height 720
+```
+
+O processamento é sequencial. Por padrão, cada vídeo é baixado, convertido em quadros, registrado no dataset e então o arquivo de vídeo é apagado antes de seguir para o próximo. Os quadros ficam em `storage/knowledge/visual-training/frames/` e o manifesto com timestamps em `storage/knowledge/visual-training/dataset-index.json`. Para preservar também os vídeos originais, acrescente `--keep-video`.
+
+Falhas ficam em `storage/knowledge/visual-training/failed-videos.json` e podem ser tentadas novamente com:
+
+```powershell
+npm run knowledge:video:retry
+```
+
+Essa etapa prepara o dataset visual; ela ainda não classifica as ações vistas nem treina um modelo automaticamente. Baixe somente conteúdo que você tem permissão para utilizar.
+
 Os artefatos são gravados em `storage/knowledge/`:
 
 - `raw/`: metadados e legendas originais;
