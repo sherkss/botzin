@@ -618,7 +618,7 @@ function mapSkill(row: RowDataPacket): BotSkill {
     spellWords: nullableRowString(row.spell_words),
     hotkey: nullableRowString(row.hotkey),
     category: row.category as BotSkill["category"],
-    manaCost: Number(row.mana_cost),
+    manaCost: nullableRowNumber(row.mana_cost),
     requiredLevel: Number(row.required_level),
     allowedVocations: String(row.allowed_vocations)
       .split(",")

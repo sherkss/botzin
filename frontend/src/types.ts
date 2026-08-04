@@ -36,8 +36,12 @@ export interface Hunt {
 export interface Skill {
   id: number;
   name: string;
+  spellWords?: string | null;
   allowedVocations: string[];
   category?: string;
+  manaCost?: number | null;
+  requiredLevel?: number;
+  enabled?: boolean;
 }
 
 export interface Assignment {
@@ -73,6 +77,53 @@ export interface HuntTelemetry {
   profit: number | null;
   creaturesJson: string | null;
   source: string;
+}
+
+export interface CatalogPage<T> {
+  query: string;
+  limit: number;
+  offset: number;
+  total: number;
+  items: T[];
+}
+
+export interface CreatureCatalogRecord {
+  id: number;
+  race: string;
+  name: string;
+  imageUrl: string | null;
+  description: string | null;
+  behaviour: string | null;
+  hitpoints: number;
+  experience: number;
+  immune: string[];
+  strong: string[];
+  weakness: string[];
+  healed: string[];
+  canBeParalysed: boolean;
+  canBeSummoned: boolean;
+  summonedMana: number;
+  canBeConvinced: boolean;
+  convincedMana: number;
+  seesInvisible: boolean;
+  lootable: boolean;
+  loot: string[];
+  sourceUrl: string;
+}
+
+export interface ItemCatalogRecord {
+  id: number;
+  sourceId: number;
+  name: string;
+  categorySlug: string | null;
+  categoryName: string | null;
+  primaryType: string | null;
+  secondaryType: string | null;
+  objectClass: string | null;
+  wikiUrl: string | null;
+  imagePath: string | null;
+  sourceUpdatedAt: string | null;
+  sourceUrl: string;
 }
 
 export interface LearningMethod {

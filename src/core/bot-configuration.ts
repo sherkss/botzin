@@ -43,7 +43,7 @@ export interface BotSkill {
   readonly spellWords: string | null;
   readonly hotkey: string | null;
   readonly category: "attack" | "healing" | "support" | "utility";
-  readonly manaCost: number;
+  readonly manaCost: number | null;
   readonly requiredLevel: number;
   readonly allowedVocations: readonly string[];
   readonly cooldownMs: number;

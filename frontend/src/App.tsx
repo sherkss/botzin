@@ -8,6 +8,7 @@ import { EntitiesPage } from "./pages/EntitiesPage.tsx";
 import { OpsPage } from "./pages/OpsPage.tsx";
 import { LearningPage } from "./pages/LearningPage.tsx";
 import { ConfigPage } from "./pages/ConfigPage.tsx";
+import { CatalogPage } from "./pages/CatalogPage.tsx";
 import { useAuth } from "./hooks/useAuth.ts";
 import { useAppState } from "./hooks/useAppState.ts";
 
@@ -52,6 +53,8 @@ export function App() {
         return <OpsPage state={state} onRefresh={refresh} />;
       case "learning":
         return <LearningPage state={state} onRefresh={refresh} />;
+      case "catalog":
+        return <CatalogPage />;
       case "config":
         return <ConfigPage state={state} statusMsg={statusMsg} onRefresh={refresh} />;
     }

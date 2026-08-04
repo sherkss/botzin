@@ -197,7 +197,7 @@ model BotSkill {
   spellWords       String?            @map("spell_words") @db.VarChar(140)
   hotkey           String?            @db.VarChar(40)
   category         SkillCategory      @default(attack)
-  manaCost         Int                @default(0) @map("mana_cost") @db.UnsignedInt
+  manaCost         Int?               @default(0) @map("mana_cost") @db.UnsignedInt
   requiredLevel    Int                @default(0) @map("required_level") @db.UnsignedInt
   allowedVocations String             @map("allowed_vocations") @db.VarChar(255)
   cooldownMs       Int                @default(1000) @map("cooldown_ms") @db.UnsignedInt
@@ -208,6 +208,58 @@ model BotSkill {
   huntRules        BotHuntSkillRule[]
 
   @@map("bot_skills")
+}
+
+model BotCreatureCatalog {
+  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  race              String   @unique(map: "uq_bot_creature_catalog_race") @db.VarChar(140)
+  name              String   @db.VarChar(255)
+  imageUrl          String?  @map("image_url") @db.VarChar(500)
+  description       String?  @db.Text
+  behaviour         String?  @db.Text
+  hitpoints         Int      @default(0) @db.UnsignedInt
+  experience        BigInt   @default(0) @db.UnsignedBigInt
+  immuneJson        Json?    @map("immune_json")
+  strongJson        Json?    @map("strong_json")
+  weaknessJson      Json?    @map("weakness_json")
+  healedJson        Json?    @map("healed_json")
+  canBeParalysed    Boolean  @default(false) @map("can_be_paralysed")
+  canBeSummoned     Boolean  @default(false) @map("can_be_summoned")
+  summonedMana      Int      @default(0) @map("summoned_mana") @db.UnsignedInt
+  canBeConvinced    Boolean  @default(false) @map("can_be_convinced")
+  convincedMana     Int      @default(0) @map("convinced_mana") @db.UnsignedInt
+  seesInvisible     Boolean  @default(false) @map("sees_invisible")
+  lootable          Boolean  @default(false)
+  lootJson          Json?    @map("loot_json")
+  sourceUrl         String   @map("source_url") @db.VarChar(500)
+  sourceGeneratedAt DateTime @map("source_generated_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([name], map: "idx_bot_creature_catalog_name")
+  @@map("bot_creature_catalog")
+}
+
+model BotItemCatalog {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  sourceId          BigInt    @unique(map: "uq_bot_item_catalog_source_id") @map("source_id") @db.UnsignedBigInt
+  name              String    @db.VarChar(255)
+  categorySlug      String?   @map("category_slug") @db.VarChar(140)
+  categoryName      String?   @map("category_name") @db.VarChar(180)
+  primaryType       String?   @map("primary_type") @db.VarChar(180)
+  secondaryType     String?   @map("secondary_type") @db.VarChar(180)
+  objectClass       String?   @map("object_class") @db.VarChar(180)
+  wikiUrl           String?   @map("wiki_url") @db.VarChar(500)
+  imagePath         String?   @map("image_path") @db.VarChar(500)
+  sourceUpdatedAt   DateTime? @map("source_updated_at")
+  sourceUrl         String    @map("source_url") @db.VarChar(500)
+  sourceGeneratedAt DateTime  @map("source_generated_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@index([name], map: "idx_bot_item_catalog_name")
+  @@index([categorySlug], map: "idx_bot_item_catalog_category")
+  @@map("bot_item_catalog")
 }
 
 model BotHuntAssignment {

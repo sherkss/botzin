@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS bot_skills (
   spell_words VARCHAR(140) NULL,
   hotkey VARCHAR(40) NULL,
   category ENUM('attack', 'healing', 'support', 'utility') NOT NULL DEFAULT 'attack',
-  mana_cost INT UNSIGNED NOT NULL DEFAULT 0,
+  mana_cost INT UNSIGNED NULL DEFAULT 0,
   required_level INT UNSIGNED NOT NULL DEFAULT 0,
   allowed_vocations VARCHAR(255) NOT NULL,
   cooldown_ms INT UNSIGNED NOT NULL DEFAULT 1000,
@@ -86,6 +86,58 @@ CREATE TABLE IF NOT EXISTS bot_skills (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_bot_skills_name (name)
+);
+
+CREATE TABLE IF NOT EXISTS bot_creature_catalog (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  race VARCHAR(140) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  image_url VARCHAR(500) NULL,
+  description TEXT NULL,
+  behaviour TEXT NULL,
+  hitpoints INT UNSIGNED NOT NULL DEFAULT 0,
+  experience BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  immune_json JSON NULL,
+  strong_json JSON NULL,
+  weakness_json JSON NULL,
+  healed_json JSON NULL,
+  can_be_paralysed BOOLEAN NOT NULL DEFAULT FALSE,
+  can_be_summoned BOOLEAN NOT NULL DEFAULT FALSE,
+  summoned_mana INT UNSIGNED NOT NULL DEFAULT 0,
+  can_be_convinced BOOLEAN NOT NULL DEFAULT FALSE,
+  convinced_mana INT UNSIGNED NOT NULL DEFAULT 0,
+  sees_invisible BOOLEAN NOT NULL DEFAULT FALSE,
+  lootable BOOLEAN NOT NULL DEFAULT FALSE,
+  loot_json JSON NULL,
+  source_url VARCHAR(500) NOT NULL,
+  source_generated_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_bot_creature_catalog_race (race),
+  KEY idx_bot_creature_catalog_name (name)
+);
+
+CREATE TABLE IF NOT EXISTS bot_item_catalog (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  source_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  category_slug VARCHAR(140) NULL,
+  category_name VARCHAR(180) NULL,
+  primary_type VARCHAR(180) NULL,
+  secondary_type VARCHAR(180) NULL,
+  object_class VARCHAR(180) NULL,
+  wiki_url VARCHAR(500) NULL,
+  image_path VARCHAR(500) NULL,
+  source_updated_at DATETIME NULL,
+  source_url VARCHAR(500) NOT NULL,
+  source_generated_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_bot_item_catalog_source_id (source_id),
+  KEY idx_bot_item_catalog_name (name),
+  KEY idx_bot_item_catalog_category (category_slug)
 );
 
 CREATE TABLE IF NOT EXISTS bot_hunt_assignments (

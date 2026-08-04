@@ -52,7 +52,10 @@ function ListCard<T>({ title, items, render }: { title: string; items: T[]; rend
 
 function renderSkill(s: Skill): string {
   const vocations = s.allowedVocations?.join(", ") ?? "";
-  return `${s.name} — ${s.category ?? "?"}${vocations ? ` (${vocations})` : ""}`;
+  const mana = s.manaCost === null ? "mana variável" : `${s.manaCost ?? 0} mana`;
+  const level = s.requiredLevel ? `lvl ${s.requiredLevel}` : "desbloqueio especial";
+  const words = s.spellWords ? ` — ${s.spellWords}` : "";
+  return `${s.name}${words} — ${mana}, ${level} — ${s.category ?? "?"}${vocations ? ` (${vocations})` : ""}`;
 }
 
 function renderAssignment(a: Assignment, state: AppState): string {

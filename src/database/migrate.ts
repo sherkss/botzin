@@ -5,6 +5,8 @@ import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { createMysqlPool } from "./mysql-pool.js";
 import type { RowDataPacket } from "mysql2/promise";
 import { seedBasicGameKnowledge } from "../learning/basic-game-knowledge.js";
+import { seedTibiaSpells } from "../learning/seed-tibia-spells.js";
+import { seedTibiaGameCatalog } from "../learning/seed-tibia-game-catalog.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const schemaPath = resolve(currentDir, "../../database/schema.sql");
@@ -23,6 +25,7 @@ async function main(): Promise<void> {
   }
 
   await pool.query("ALTER TABLE bot_learning_sources ALTER COLUMN trust_level SET DEFAULT 'low'");
+  await pool.query("ALTER TABLE bot_skills MODIFY mana_cost INT UNSIGNED NULL DEFAULT 0");
 
   const [indexRows] = await pool.query<Array<RowDataPacket & { count: number }>>(
     `SELECT COUNT(*) AS count
@@ -56,6 +59,8 @@ async function main(): Promise<void> {
   }
 
   await seedBasicGameKnowledge(pool);
+  await seedTibiaSpells(pool);
+  await seedTibiaGameCatalog(pool);
 
   await pool.end();
   console.log(`Database schema migrated on ${config.mysqlHost}:${config.mysqlPort}/${config.mysqlDatabase}.`);

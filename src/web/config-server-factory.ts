@@ -13,6 +13,7 @@ import { hasRole } from "../auth/role-policy.js";
 import type { RuntimeConfig } from "../config/runtime-config.js";
 import { ConfigUserRepository } from "../database/config-user-repository.js";
 import { ConfigurationRepository } from "../database/configuration-repository.js";
+import { GameCatalogRepository } from "../database/game-catalog-repository.js";
 import { ObsPreviewFrameSource } from "../perception/obs-preview-frame-source.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { LiveDecisionStore } from "../decision/live-decision-store.js";
@@ -139,6 +140,7 @@ export function createConfigServer(
   decisionLogPath = join(storageDir, "live-decisions.jsonl")
 ): Server {
   const repository = new ConfigurationRepository(pool);
+  const gameCatalogRepository = new GameCatalogRepository(pool);
   const userRepository = new ConfigUserRepository(pool);
   const jwtService = new JwtService(config);
   const obsPreview = new ObsPreviewFrameSource(config);
@@ -167,6 +169,20 @@ export function createConfigServer(
     if (method === "GET" && pathname === "/api/config") {
       requireRole(user, "viewer");
       sendJson(response, 200, await repository.getSnapshot());
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/catalog/creatures") {
+      requireRole(user, "viewer");
+      const options = catalogSearchOptions(requestUrl);
+      sendJson(response, 200, await gameCatalogRepository.searchCreatures(options.query, options.limit, options.offset));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/catalog/items") {
+      requireRole(user, "viewer");
+      const options = catalogSearchOptions(requestUrl);
+      sendJson(response, 200, await gameCatalogRepository.searchItems(options.query, options.limit, options.offset));
       return;
     }
 
@@ -569,4 +585,18 @@ export function createConfigServer(
 async function cleanupPartialFile(path: string | null): Promise<void> {
   if (!path) return;
   await unlink(path).catch(() => undefined);
+}
+
+function catalogSearchOptions(url: URL): { query: string; limit: number; offset: number } {
+  const query = (url.searchParams.get("q") ?? "").trim();
+  if (query.length > 100) throw httpError(400, "Catalog search query is limited to 100 characters.");
+  const limit = Number(url.searchParams.get("limit") ?? 25);
+  const offset = Number(url.searchParams.get("offset") ?? 0);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw httpError(400, "Catalog limit must be an integer between 1 and 100.");
+  }
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000) {
+    throw httpError(400, "Catalog offset must be a non-negative integer.");
+  }
+  return { query, limit, offset };
 }

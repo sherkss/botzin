@@ -148,6 +148,45 @@ Importante: se `BOTZIN_JWT_SECRET` ficar com o valor padrao, o backend recusa ge
 
 ## Decisao de skill
 
+### Catálogo oficial de magias por vocação
+
+O `npm run migrate` cadastra de forma idempotente as 193 magias publicadas na
+[biblioteca oficial do Tibia](https://www.tibia.com/library/?subtopic=spells), incluindo palavras, categoria,
+nível, custo de mana e as vocações Druid, Knight, Paladin, Sorcerer e Monk (com suas promoções). As magias entram
+desabilitadas para que o catálogo não autorize ações automaticamente; hotkeys e regras configuradas pelo usuário
+são preservadas nas atualizações.
+
+Custos publicados como `var.` são armazenados como `NULL` e aparecem no painel como `mana variável`, nunca como
+custo zero. Para buscar uma fotografia atualizada do site oficial e regenerar o catálogo versionado:
+
+```powershell
+npm run skills:sync
+npm run migrate
+```
+
+Depois abra `Configuração atual -> Skills` para consultar magia, palavras, mana, nível e vocações.
+
+### Catálogo de criaturas e itens
+
+O sistema também mantém dois catálogos locais pesquisáveis:
+
+- 718 criaturas da [biblioteca oficial do Tibia via TibiaData](https://api.tibiadata.com/v4/creatures), com HP,
+  XP, descrição, comportamento, imunidades, resistências, fraquezas, condições especiais e loot;
+- 6.465 itens básicos da [API aberta ByteWizards/TibiaWiki](https://tibiadata.bytewizards.de/), com nome,
+  categoria, tipo, classe, link de origem e data da fonte. O Tibia não oferece uma biblioteca oficial equivalente
+  para todos os itens, por isso a procedência comunitária é exibida explicitamente.
+
+Para atualizar e aplicar os catálogos:
+
+```powershell
+npm run catalog:sync
+npm run migrate
+```
+
+Também é possível atualizar separadamente com `npm run creatures:sync` ou `npm run items:sync`. No painel, abra
+`Catálogo` para pesquisar sem carregar milhares de registros na configuração principal. A API oferece
+`GET /api/catalog/creatures` e `GET /api/catalog/items`, com os parâmetros `q`, `limit` e `offset`.
+
 Os campos principais para decidir se uma skill pode ser usada sao:
 
 - `manaCost`: quanto de mana a skill consome.
