@@ -137,12 +137,19 @@ export function CatalogPage() {
 }
 
 function KnowledgeCard({ record }: { record: GameKnowledgeRecord }) {
+  const dialogueTurns = Array.isArray(record.metadata.turns) ? record.metadata.turns.length : 0;
+  const unresolved = record.domain === "mystery" && record.metadata.resolutionStatus === "unresolved";
+  const translatedBook = record.domain === "book" && record.metadata.translationStatus === "machine-translated";
+  const bookLocation = record.domain === "book" && typeof record.metadata.location === "string" ? record.metadata.location : "";
   return (
     <article className="rounded-[9px] border border-border bg-surface p-4">
       <div className="flex items-start justify-between gap-3">
         <div><h2 className="text-[14px] font-semibold">{record.name}</h2><p className="text-[11px] text-subtle">{domainLabel(record.domain)}</p></div>
-        <span className="rounded bg-surface-3 px-2 py-1 text-[10px] text-muted">{record.trust === "official" ? "Oficial" : record.trust === "user" ? "Ensinado" : "Comunidade"}{record.volatile ? " · dinâmico" : ""}</span>
+        <span className="rounded bg-surface-3 px-2 py-1 text-[10px] text-muted">{unresolved ? "Não resolvido · " : ""}{record.trust === "official" ? "Oficial" : record.trust === "user" ? "Ensinado" : "Comunidade"}{record.volatile ? " · dinâmico" : ""}</span>
       </div>
+      {dialogueTurns > 0 && <p className="mt-2 text-[11px] font-medium text-text">{dialogueTurns.toLocaleString("pt-BR")} interações estruturadas</p>}
+      {translatedBook && <p className="mt-2 text-[11px] font-medium text-text">Português · tradução automática — original em inglês preservado</p>}
+      {bookLocation && <Line label="Encontrado em" value={bookLocation} />}
       {record.summary && <p className="mt-3 text-[12px] leading-5 text-muted">{record.summary}</p>}
       {record.content && record.content !== record.summary && <p className="mt-2 line-clamp-5 whitespace-pre-line text-[11px] leading-5 text-subtle">{record.content}</p>}
       <a href={record.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-[11px] text-link">Abrir fonte</a>
@@ -197,8 +204,8 @@ function DomainButton({ active, onClick, children }: { active: boolean; onClick:
 
 function domainLabel(domain: string): string {
   return ({
-    achievement: "Achievements", boss: "Bosses", building: "Prédios", charm: "Charms", city: "Cidades",
+    achievement: "Achievements", book: "Livros", boss: "Bosses", building: "Prédios", charm: "Charms", city: "Cidades",
     event: "Eventos", "hunting-place": "Hunts", market: "Market", mechanic: "Mecânicas", mount: "Montarias",
-    npc: "NPCs", outfit: "Outfits", quest: "Quests", rune: "Runas", "soul-core": "Soul Cores"
+    mystery: "Mistérios", npc: "NPCs", "npc-dialogue": "Diálogos de NPC", outfit: "Outfits", quest: "Quests", rune: "Runas", "soul-core": "Soul Cores"
   } as Record<string, string>)[domain] ?? domain;
 }

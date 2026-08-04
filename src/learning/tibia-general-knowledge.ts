@@ -1,6 +1,6 @@
 export const TIBIA_KNOWLEDGE_DOMAINS = [
-  "achievement", "boss", "building", "charm", "city", "event", "hunting-place",
-  "market", "mechanic", "mount", "npc", "outfit", "quest", "rune", "soul-core"
+  "achievement", "book", "boss", "building", "charm", "city", "event", "hunting-place",
+  "market", "mechanic", "mount", "mystery", "npc", "npc-dialogue", "outfit", "quest", "rune", "soul-core"
 ] as const;
 
 export type TibiaKnowledgeDomain = (typeof TIBIA_KNOWLEDGE_DOMAINS)[number];
@@ -155,6 +155,35 @@ export const USER_TAUGHT_KNOWLEDGE: readonly TibiaKnowledgeEntry[] = [
     sourceUpdatedAt: null,
     trust: "user",
     volatile: false
+  }
+];
+
+export const CURATED_MYSTERY_KNOWLEDGE: readonly TibiaKnowledgeEntry[] = [
+  {
+    key: "community:mystery:469",
+    domain: "mystery",
+    name: "Linguagem 469 dos Bonelords",
+    summary: "Mistério sem tradução publicamente comprovada; teorias não devem ser tratadas como solução.",
+    content: "469 é apresentada no jogo como uma linguagem numérica associada aos Bonelords e aparece em livros e falas. Existem propostas de tradução e relações sugeridas com outros mistérios, mas nenhuma solução pública possui evidência suficiente para ser classificada como confirmada. A IA deve preservar sequências originais como evidência, comparar fontes e rotular qualquer interpretação como hipótese.",
+    metadata: {
+      resolutionStatus: "unresolved",
+      subject: "Bonelord language",
+      facts: [
+        "Há textos numéricos atribuídos à linguagem 469 dentro do jogo.",
+        "NPCs e materiais do jogo fazem referências à linguagem dos Bonelords."
+      ],
+      hypotheses: [],
+      rejectedClaims: [],
+      evidencePolicy: "No theory becomes confirmed without reproducible in-game or official evidence.",
+      references: [
+        "https://www.tibiawiki.com.br/wiki/469",
+        "https://tibia.fandom.com/wiki/469"
+      ]
+    },
+    sourceUrl: "https://www.tibiawiki.com.br/wiki/469",
+    sourceUpdatedAt: null,
+    trust: "community",
+    volatile: true
   }
 ];
 

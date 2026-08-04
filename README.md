@@ -189,9 +189,9 @@ Também é possível atualizar separadamente com `npm run creatures:sync` ou `np
 
 ### Conhecimento amplo do jogo
 
-O `npm run migrate` também carrega 4.564 registros pesquisáveis de conhecimento: achievements, bosses,
-prédios, charms, cidades, eventos, hunting places, mecânicas de Market, montarias, NPCs, outfits, quests,
-runas e Soul Cores. Quests, NPCs, achievements e hunts preservam conteúdo e metadados estruturados da
+O `npm run migrate` também carrega 6.246 registros pesquisáveis de conhecimento: achievements, livros, bosses,
+prédios, charms, cidades, eventos, hunting places, mecânicas de Market, montarias, NPCs, diálogos, mistérios,
+outfits, quests, runas e Soul Cores. Quests, NPCs, achievements e hunts preservam conteúdo e metadados estruturados da
 [API aberta ByteWizards/TibiaWiki](https://tibiadata.bytewizards.de/); as 33 runas e os guias de mecânicas
 mantêm a fonte oficial identificada.
 
@@ -216,6 +216,37 @@ Boss e quest aceitam vocações repetidas e podem ultrapassar 5 participantes qu
 Para upar, o validador também aplica a regra oficial do Shared Experience: todos os levels são obrigatórios e
 o menor deve ser pelo menos dois terços do maior (`menor * 3 >= maior * 2`). Essa faixa não bloqueia boss/quest.
 Essas regras validam a composição, mas não classificam uma hunt como solo/party quando a fonte não informa isso.
+
+### Diálogos de NPCs e mistérios
+
+O sincronizador consulta a categoria de NPCs com transcrições pela API MediaWiki do Tibia Fandom. Cada conversa
+é transformada em turnos estruturados (`playerText`, palavras-chave, condições, NPC e resposta), mantendo URL de
+atribuição, revisão e licença CC-BY-SA. Veja [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Mistérios são armazenados separadamente com `resolutionStatus`. A linguagem 469, por exemplo, começa como
+`unresolved`: fatos documentados, hipóteses e alegações rejeitadas não são misturados, e nenhuma teoria vira
+solução sem evidência oficial ou reproduzível dentro do jogo.
+
+O TibiaWiki.com.br pode ser usado como referência por link, mas não é copiado em massa: durante a integração sua
+API MediaWiki respondeu HTTP 403 e o site declara o conteúdo como protegido. Um conector direto exige autorização
+ou uma exportação/API fornecida pelo próprio fansite.
+
+### Livros e bibliotecas
+
+O domínio `book` importa os textos de livros documentados na categoria aberta `Book Texts` do Tibia Fandom.
+Cada registro guarda o inglês original, texto PT-BR, localização, biblioteca, autor, volumes anterior/seguinte,
+páginas relacionadas, revisão e atribuição. A interface identifica claramente a versão PT-BR como tradução
+automática; nomes do jogo e o original permanecem disponíveis para conferência. Textos exclusivamente numéricos,
+como evidências da linguagem 469, não são alterados.
+
+Para atualizar traduções modificadas, instale o Argos Translate e o modelo `en_pt`, informe o Python em
+`BOTZIN_ARGOS_PYTHON` quando necessário e execute:
+
+```powershell
+npm run books:translate
+npm run knowledge:sync:tibia
+npm run migrate
+```
 
 Os campos principais para decidir se uma skill pode ser usada sao:
 
