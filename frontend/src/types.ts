@@ -126,6 +126,37 @@ export interface ItemCatalogRecord {
   sourceUrl: string;
 }
 
+export interface GameKnowledgeRecord {
+  id: number;
+  key: string;
+  domain: string;
+  name: string;
+  summary: string | null;
+  content: string;
+  metadata: Record<string, unknown>;
+  sourceUrl: string;
+  sourceUpdatedAt: string | null;
+  trust: "official" | "community" | "user";
+  volatile: boolean;
+}
+
+export interface GameKnowledgeCoverage {
+  total: number;
+  official: number;
+  community: number;
+  user: number;
+  volatile: number;
+  domains: Array<{ domain: string; count: number }>;
+}
+
+export interface TibiaLiveStatus {
+  fetchedAt: string;
+  boostedCreature: { name: string; imageUrl: string | null };
+  boostedBoss: { name: string; imageUrl: string | null };
+  eventScheduleUrl: string;
+  marketRequiresWorldSnapshot: true;
+}
+
 export interface LearningMethod {
   id: number;
   name: string;

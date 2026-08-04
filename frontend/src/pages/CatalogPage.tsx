@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { apiFetch } from "../api.ts";
-import type { CatalogPage, CreatureCatalogRecord, ItemCatalogRecord } from "../types.ts";
+import type { CatalogPage, CreatureCatalogRecord, GameKnowledgeCoverage, GameKnowledgeRecord, ItemCatalogRecord, TibiaLiveStatus } from "../types.ts";
 
-type CatalogKind = "creatures" | "items";
+type CatalogKind = "creatures" | "items" | "knowledge";
 const PAGE_SIZE = 25;
 
 export function CatalogPage() {
@@ -10,14 +10,18 @@ export function CatalogPage() {
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
-  const [page, setPage] = useState<CatalogPage<CreatureCatalogRecord | ItemCatalogRecord> | null>(null);
+  const [domain, setDomain] = useState("");
+  const [page, setPage] = useState<CatalogPage<CreatureCatalogRecord | ItemCatalogRecord | GameKnowledgeRecord> | null>(null);
+  const [coverage, setCoverage] = useState<GameKnowledgeCoverage | null>(null);
+  const [liveStatus, setLiveStatus] = useState<TibiaLiveStatus | null>(null);
   const [status, setStatus] = useState("Carregando catálogo...");
 
   useEffect(() => {
     let active = true;
     setStatus("Carregando catálogo...");
     const params = new URLSearchParams({ q: query, limit: String(PAGE_SIZE), offset: String(offset) });
-    void apiFetch<CatalogPage<CreatureCatalogRecord | ItemCatalogRecord>>(`/api/catalog/${kind}?${params}`)
+    if (kind === "knowledge" && domain) params.set("domain", domain);
+    void apiFetch<CatalogPage<CreatureCatalogRecord | ItemCatalogRecord | GameKnowledgeRecord>>(`/api/catalog/${kind}?${params}`)
       .then((value) => {
         if (!active) return;
         setPage(value);
@@ -27,10 +31,21 @@ export function CatalogPage() {
         if (active) setStatus(error instanceof Error ? error.message : "Falha ao consultar catálogo.");
       });
     return () => { active = false; };
-  }, [kind, query, offset]);
+  }, [kind, domain, query, offset]);
+
+  useEffect(() => {
+    if (kind !== "knowledge" || coverage) return;
+    void apiFetch<GameKnowledgeCoverage>("/api/catalog/knowledge/coverage").then(setCoverage).catch(() => undefined);
+  }, [kind, coverage]);
+
+  useEffect(() => {
+    if (kind !== "knowledge" || liveStatus) return;
+    void apiFetch<TibiaLiveStatus>("/api/catalog/live-status").then(setLiveStatus).catch(() => undefined);
+  }, [kind, liveStatus]);
 
   function selectKind(value: CatalogKind): void {
     setKind(value);
+    setDomain("");
     setOffset(0);
     setPage(null);
   }
@@ -45,22 +60,52 @@ export function CatalogPage() {
     <div className="flex flex-1 flex-col">
       <div className="border-b border-border px-6 py-5">
         <h1 className="text-[18px] font-semibold">Catálogo do jogo</h1>
-        <p className="mt-0.5 text-[13px] text-muted">Criaturas oficiais e itens pesquisáveis para consulta da IA</p>
+        <p className="mt-0.5 text-[13px] text-muted">Criaturas, itens e conhecimento estruturado consultado pela IA</p>
       </div>
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <Tab active={kind === "creatures"} onClick={() => selectKind("creatures")}>Criaturas</Tab>
           <Tab active={kind === "items"} onClick={() => selectKind("items")}>Itens</Tab>
+          <Tab active={kind === "knowledge"} onClick={() => selectKind("knowledge")}>Conhecimento</Tab>
           <form onSubmit={search} className="ml-auto flex min-w-[280px] gap-2">
             <input
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder={kind === "creatures" ? "Buscar dragon, demon..." : "Buscar armor, potion..."}
+              placeholder={kind === "creatures" ? "Buscar dragon, demon..." : kind === "items" ? "Buscar armor, potion..." : "Buscar quest, cidade, boss..."}
               className="min-w-0 flex-1 rounded-[6px] border border-border bg-bg px-3 py-2 text-[12px] outline-none focus:border-link"
             />
             <button className="rounded-[6px] bg-accent px-4 py-2 text-[12px] font-medium text-white">Buscar</button>
           </form>
         </div>
+
+        {kind === "knowledge" && coverage && (
+          <div className="mb-4 rounded-[8px] border border-border bg-surface p-3">
+            <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted">
+              <span><b className="text-text">{coverage.total.toLocaleString("pt-BR")}</b> conhecimentos</span>
+              <span>{coverage.official.toLocaleString("pt-BR")} oficiais</span>
+              <span>{coverage.community.toLocaleString("pt-BR")} comunitários</span>
+              <span>{coverage.user.toLocaleString("pt-BR")} ensinado pelo usuário</span>
+              <span>{coverage.volatile.toLocaleString("pt-BR")} exigem atualização frequente</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <DomainButton active={!domain} onClick={() => { setDomain(""); setOffset(0); }}>Todos</DomainButton>
+              {coverage.domains.map((item) => (
+                <DomainButton key={item.domain} active={domain === item.domain} onClick={() => { setDomain(item.domain); setOffset(0); }}>
+                  {domainLabel(item.domain)} ({item.count})
+                </DomainButton>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {kind === "knowledge" && liveStatus && (
+          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[8px] border border-border bg-surface px-4 py-3 text-[11px] text-muted">
+            <span className="font-medium text-text">Status oficial:</span>
+            <span>Criatura boostada: <b className="text-text">{liveStatus.boostedCreature.name}</b></span>
+            <span>Boss boostado: <b className="text-text">{liveStatus.boostedBoss.name}</b></span>
+            <a href={liveStatus.eventScheduleUrl} target="_blank" rel="noreferrer" className="text-link">Calendário de eventos</a>
+          </div>
+        )}
 
         <div className="mb-3 flex items-center justify-between text-[12px] text-muted">
           <span>{page ? `${page.total.toLocaleString("pt-BR")} registros` : status}</span>
@@ -73,7 +118,9 @@ export function CatalogPage() {
           <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3">
             {page?.items.map((record) => kind === "creatures"
               ? <CreatureCard key={record.id} creature={record as CreatureCatalogRecord} />
-              : <ItemCard key={record.id} item={record as ItemCatalogRecord} />)}
+              : kind === "items"
+                ? <ItemCard key={record.id} item={record as ItemCatalogRecord} />
+                : <KnowledgeCard key={record.id} record={record as GameKnowledgeRecord} />)}
           </div>
         )}
 
@@ -86,6 +133,20 @@ export function CatalogPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function KnowledgeCard({ record }: { record: GameKnowledgeRecord }) {
+  return (
+    <article className="rounded-[9px] border border-border bg-surface p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div><h2 className="text-[14px] font-semibold">{record.name}</h2><p className="text-[11px] text-subtle">{domainLabel(record.domain)}</p></div>
+        <span className="rounded bg-surface-3 px-2 py-1 text-[10px] text-muted">{record.trust === "official" ? "Oficial" : record.trust === "user" ? "Ensinado" : "Comunidade"}{record.volatile ? " · dinâmico" : ""}</span>
+      </div>
+      {record.summary && <p className="mt-3 text-[12px] leading-5 text-muted">{record.summary}</p>}
+      {record.content && record.content !== record.summary && <p className="mt-2 line-clamp-5 whitespace-pre-line text-[11px] leading-5 text-subtle">{record.content}</p>}
+      <a href={record.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-[11px] text-link">Abrir fonte</a>
+    </article>
   );
 }
 
@@ -128,4 +189,16 @@ function Tab({ active, onClick, children }: { active: boolean; onClick: () => vo
 
 function PageButton({ disabled, onClick, children }: { disabled: boolean; onClick: () => void; children: React.ReactNode }) {
   return <button disabled={disabled} onClick={onClick} className="rounded-[6px] border border-border px-3 py-2 text-[12px] text-muted disabled:opacity-40">{children}</button>;
+}
+
+function DomainButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return <button onClick={onClick} className={`rounded px-2 py-1 text-[10px] ${active ? "bg-accent text-white" : "bg-surface-3 text-muted"}`}>{children}</button>;
+}
+
+function domainLabel(domain: string): string {
+  return ({
+    achievement: "Achievements", boss: "Bosses", building: "Prédios", charm: "Charms", city: "Cidades",
+    event: "Eventos", "hunting-place": "Hunts", market: "Market", mechanic: "Mecânicas", mount: "Montarias",
+    npc: "NPCs", outfit: "Outfits", quest: "Quests", rune: "Runas", "soul-core": "Soul Cores"
+  } as Record<string, string>)[domain] ?? domain;
 }

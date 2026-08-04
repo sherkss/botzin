@@ -39,6 +39,29 @@ export interface ItemCatalogRecord {
   readonly sourceUrl: string;
 }
 
+export interface GameKnowledgeRecord {
+  readonly id: number;
+  readonly key: string;
+  readonly domain: string;
+  readonly name: string;
+  readonly summary: string | null;
+  readonly content: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly sourceUrl: string;
+  readonly sourceUpdatedAt: string | null;
+  readonly trust: "official" | "community" | "user";
+  readonly volatile: boolean;
+}
+
+export interface GameKnowledgeCoverage {
+  readonly total: number;
+  readonly official: number;
+  readonly community: number;
+  readonly user: number;
+  readonly volatile: number;
+  readonly domains: readonly { readonly domain: string; readonly count: number }[];
+}
+
 export interface CatalogPage<T> {
   readonly query: string;
   readonly limit: number;
@@ -88,6 +111,49 @@ export class GameCatalogRepository {
     );
     return { query, limit, offset, total: Number(countRows[0]?.total ?? 0), items: rows.map(mapItem) };
   }
+
+  async searchKnowledge(query: string, domain: string | null, limit: number, offset: number): Promise<CatalogPage<GameKnowledgeRecord>> {
+    const clauses: string[] = [];
+    const parameters: unknown[] = [];
+    if (domain) { clauses.push("domain = ?"); parameters.push(domain); }
+    if (query) {
+      const pattern = `%${escapeLike(query)}%`;
+      clauses.push("(name LIKE ? ESCAPE '\\\\' OR summary LIKE ? ESCAPE '\\\\' OR content LIKE ? ESCAPE '\\\\')");
+      parameters.push(pattern, pattern, pattern);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const [countRows] = await this.pool.query<Array<RowDataPacket & { total: number }>>(
+      `SELECT COUNT(*) AS total FROM bot_game_knowledge ${where}`,
+      parameters
+    );
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT id, knowledge_key, domain, name, summary, content, CAST(metadata_json AS CHAR) AS metadata_json,
+              source_url, source_updated_at, trust_level, volatile
+         FROM bot_game_knowledge ${where} ORDER BY domain, name LIMIT ? OFFSET ?`,
+      [...parameters, limit, offset]
+    );
+    return { query, limit, offset, total: Number(countRows[0]?.total ?? 0), items: rows.map(mapKnowledge) };
+  }
+
+  async knowledgeCoverage(): Promise<GameKnowledgeCoverage> {
+    const [totals] = await this.pool.query<Array<RowDataPacket & { total: number; official: number; community: number; user: number; volatile: number }>>(
+      `SELECT COUNT(*) AS total,
+              SUM(trust_level = 'official') AS official,
+              SUM(trust_level = 'community') AS community,
+              SUM(trust_level = 'user') AS user,
+              SUM(volatile = TRUE) AS volatile
+         FROM bot_game_knowledge`
+    );
+    const [domains] = await this.pool.query<Array<RowDataPacket & { domain: string; count: number }>>(
+      "SELECT domain, COUNT(*) AS count FROM bot_game_knowledge GROUP BY domain ORDER BY domain"
+    );
+    const total = totals[0];
+    return {
+      total: Number(total?.total ?? 0), official: Number(total?.official ?? 0),
+      community: Number(total?.community ?? 0), user: Number(total?.user ?? 0), volatile: Number(total?.volatile ?? 0),
+      domains: domains.map((row) => ({ domain: String(row.domain), count: Number(row.count) }))
+    };
+  }
 }
 
 function mapCreature(row: RowDataPacket): CreatureCatalogRecord {
@@ -114,6 +180,16 @@ function mapItem(row: RowDataPacket): ItemCatalogRecord {
   };
 }
 
+function mapKnowledge(row: RowDataPacket): GameKnowledgeRecord {
+  return {
+    id: Number(row.id), key: String(row.knowledge_key), domain: String(row.domain), name: String(row.name),
+    summary: nullableString(row.summary), content: String(row.content), metadata: jsonObject(row.metadata_json),
+    sourceUrl: String(row.source_url), sourceUpdatedAt: dateString(row.source_updated_at),
+    trust: row.trust_level === "official" ? "official" : row.trust_level === "user" ? "user" : "community",
+    volatile: Boolean(row.volatile)
+  };
+}
+
 function jsonStringArray(value: unknown): string[] {
   if (typeof value !== "string") return [];
   try {
@@ -122,6 +198,14 @@ function jsonStringArray(value: unknown): string[] {
   } catch {
     return [];
   }
+}
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== "string") return {};
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch { return {}; }
 }
 
 function nullableString(value: unknown): string | null {

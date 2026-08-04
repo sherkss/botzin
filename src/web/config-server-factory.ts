@@ -14,6 +14,8 @@ import type { RuntimeConfig } from "../config/runtime-config.js";
 import { ConfigUserRepository } from "../database/config-user-repository.js";
 import { ConfigurationRepository } from "../database/configuration-repository.js";
 import { GameCatalogRepository } from "../database/game-catalog-repository.js";
+import { TIBIA_KNOWLEDGE_DOMAINS } from "../learning/tibia-general-knowledge.js";
+import { TibiaLiveStatusService } from "../knowledge/tibia-live-status.js";
 import { ObsPreviewFrameSource } from "../perception/obs-preview-frame-source.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { LiveDecisionStore } from "../decision/live-decision-store.js";
@@ -141,6 +143,7 @@ export function createConfigServer(
 ): Server {
   const repository = new ConfigurationRepository(pool);
   const gameCatalogRepository = new GameCatalogRepository(pool);
+  const tibiaLiveStatus = new TibiaLiveStatusService();
   const userRepository = new ConfigUserRepository(pool);
   const jwtService = new JwtService(config);
   const obsPreview = new ObsPreviewFrameSource(config);
@@ -183,6 +186,29 @@ export function createConfigServer(
       requireRole(user, "viewer");
       const options = catalogSearchOptions(requestUrl);
       sendJson(response, 200, await gameCatalogRepository.searchItems(options.query, options.limit, options.offset));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/catalog/knowledge") {
+      requireRole(user, "viewer");
+      const options = catalogSearchOptions(requestUrl);
+      const domain = (requestUrl.searchParams.get("domain") ?? "").trim() || null;
+      if (domain && !TIBIA_KNOWLEDGE_DOMAINS.includes(domain as (typeof TIBIA_KNOWLEDGE_DOMAINS)[number])) {
+        throw httpError(400, "Unknown Tibia knowledge domain.");
+      }
+      sendJson(response, 200, await gameCatalogRepository.searchKnowledge(options.query, domain, options.limit, options.offset));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/catalog/knowledge/coverage") {
+      requireRole(user, "viewer");
+      sendJson(response, 200, await gameCatalogRepository.knowledgeCoverage());
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/catalog/live-status") {
+      requireRole(user, "viewer");
+      sendJson(response, 200, await tibiaLiveStatus.get());
       return;
     }
 

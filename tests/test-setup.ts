@@ -35,6 +35,7 @@ const DATA_TABLES = [
   "bot_hunt_assignments",
   "bot_creature_catalog",
   "bot_item_catalog",
+  "bot_game_knowledge",
   "bot_skills",
   "bot_hunts",
   "bot_characters",

@@ -210,6 +210,12 @@ model BotSkill {
   @@map("bot_skills")
 }
 
+enum GameKnowledgeTrust {
+  official
+  community
+  user
+}
+
 model BotCreatureCatalog {
   id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
   race              String   @unique(map: "uq_bot_creature_catalog_race") @db.VarChar(140)
@@ -260,6 +266,27 @@ model BotItemCatalog {
   @@index([name], map: "idx_bot_item_catalog_name")
   @@index([categorySlug], map: "idx_bot_item_catalog_category")
   @@map("bot_item_catalog")
+}
+
+model BotGameKnowledge {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  knowledgeKey      String    @unique(map: "uq_bot_game_knowledge_key") @map("knowledge_key") @db.VarChar(255)
+  domain            String    @db.VarChar(80)
+  name              String    @db.VarChar(255)
+  summary           String?   @db.Text
+  content           String    @db.MediumText
+  metadataJson      Json?     @map("metadata_json")
+  sourceUrl         String    @map("source_url") @db.VarChar(500)
+  sourceUpdatedAt   DateTime? @map("source_updated_at")
+  trustLevel        GameKnowledgeTrust @map("trust_level")
+  volatile          Boolean   @default(false)
+  sourceGeneratedAt DateTime  @map("source_generated_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@index([domain, name], map: "idx_bot_game_knowledge_domain_name")
+  @@index([name], map: "idx_bot_game_knowledge_name")
+  @@map("bot_game_knowledge")
 }
 
 model BotHuntAssignment {

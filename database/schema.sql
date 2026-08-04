@@ -140,6 +140,27 @@ CREATE TABLE IF NOT EXISTS bot_item_catalog (
   KEY idx_bot_item_catalog_category (category_slug)
 );
 
+CREATE TABLE IF NOT EXISTS bot_game_knowledge (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  knowledge_key VARCHAR(255) NOT NULL,
+  domain VARCHAR(80) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  summary TEXT NULL,
+  content MEDIUMTEXT NOT NULL,
+  metadata_json JSON NULL,
+  source_url VARCHAR(500) NOT NULL,
+  source_updated_at DATETIME NULL,
+  trust_level ENUM('official', 'community', 'user') NOT NULL,
+  volatile BOOLEAN NOT NULL DEFAULT FALSE,
+  source_generated_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_bot_game_knowledge_key (knowledge_key),
+  KEY idx_bot_game_knowledge_domain_name (domain, name),
+  KEY idx_bot_game_knowledge_name (name)
+);
+
 CREATE TABLE IF NOT EXISTS bot_hunt_assignments (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   machine_id BIGINT UNSIGNED NOT NULL,

@@ -19,6 +19,7 @@
     "knowledge:ingest": "tsx src/knowledge/ingest-youtube.ts",
     "knowledge:ingest:whisper": "tsx src/knowledge/ingest-youtube.ts --whisper-missing",
     "knowledge:reindex": "tsx src/knowledge/ingest-youtube.ts --index-only",
+    "knowledge:sync:tibia": "tsx src/learning/sync-tibia-general-knowledge.ts",
     "skills:sync": "tsx src/learning/sync-tibia-spells.ts",
     "catalog:sync": "tsx src/learning/sync-tibia-game-catalog.ts",
     "creatures:sync": "tsx src/learning/sync-tibia-game-catalog.ts --creatures-only",

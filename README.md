@@ -187,6 +187,36 @@ Também é possível atualizar separadamente com `npm run creatures:sync` ou `np
 `Catálogo` para pesquisar sem carregar milhares de registros na configuração principal. A API oferece
 `GET /api/catalog/creatures` e `GET /api/catalog/items`, com os parâmetros `q`, `limit` e `offset`.
 
+### Conhecimento amplo do jogo
+
+O `npm run migrate` também carrega 4.564 registros pesquisáveis de conhecimento: achievements, bosses,
+prédios, charms, cidades, eventos, hunting places, mecânicas de Market, montarias, NPCs, outfits, quests,
+runas e Soul Cores. Quests, NPCs, achievements e hunts preservam conteúdo e metadados estruturados da
+[API aberta ByteWizards/TibiaWiki](https://tibiadata.bytewizards.de/); as 33 runas e os guias de mecânicas
+mantêm a fonte oficial identificada.
+
+Para regenerar essa fotografia versionada e aplicá-la:
+
+```powershell
+npm run knowledge:sync:tibia
+npm run migrate
+```
+
+No painel, abra `Catálogo -> Conhecimento` para ver a cobertura por domínio, pesquisar o conteúdo e abrir a
+fonte de cada resposta. Os endpoints são `GET /api/catalog/knowledge`,
+`GET /api/catalog/knowledge/coverage` e `GET /api/catalog/live-status`.
+
+Informações estáticas e dinâmicas não são misturadas: criatura/boss boostado são consultados na fonte oficial
+com cache curto; calendário e Market são marcados como voláteis. Preços do Market não fazem parte do catálogo,
+pois variam por mundo e horário — devem entrar como `market-snapshot` com mundo, item e data da captura.
+
+Regras de party ensinadas pelo usuário também ficam com procedência própria: para upar são permitidos 2 a 5
+personagens; EK e ED formam o núcleo normalmente recomendado; party para upar não aceita vocação repetida.
+Boss e quest aceitam vocações repetidas e podem ultrapassar 5 participantes quando o conteúdo exigir.
+Para upar, o validador também aplica a regra oficial do Shared Experience: todos os levels são obrigatórios e
+o menor deve ser pelo menos dois terços do maior (`menor * 3 >= maior * 2`). Essa faixa não bloqueia boss/quest.
+Essas regras validam a composição, mas não classificam uma hunt como solo/party quando a fonte não informa isso.
+
 Os campos principais para decidir se uma skill pode ser usada sao:
 
 - `manaCost`: quanto de mana a skill consome.
