@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { CollapsibleCard } from "../components/CollapsibleCard.tsx";
 import { Field, GroupLabel, Input, Select, Textarea } from "../components/Field.tsx";
 import { FormBody, useFormSubmit } from "../components/FormSection.tsx";
-import { apiFetch, apiPost } from "../api.ts";
+import { apiFetch, apiFetchBlob, apiPost } from "../api.ts";
 import type { AppState, HuntTelemetry, LiveDecisionRecord, LiveDecisionSnapshot } from "../types.ts";
 
 interface Props {
@@ -236,6 +236,7 @@ function LiveDecisionCard() {
 
       {latest && (
         <div className="mt-4 rounded-[6px] border border-border bg-bg p-4">
+          <AnnotatedLivePreview record={latest} />
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="text-[11px] uppercase tracking-[0.06em] text-muted">Decisão atual</div>
@@ -370,6 +371,73 @@ function AssignmentCard({ state, onRefresh }: Props) {
       {statusMessage && <p className="mt-2 text-[12px] text-muted">{statusMessage}</p>}
     </CollapsibleCard>
   );
+}
+
+function AnnotatedLivePreview({ record }: { record: LiveDecisionRecord }) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState("");
+  const entities = record.entities ?? [];
+  const frame = record.frame;
+
+  useEffect(() => {
+    let disposed = false;
+    let objectUrl = "";
+    void apiFetchBlob(`/api/obs/preview?t=${encodeURIComponent(record.id)}`)
+      .then((blob) => {
+        if (disposed) return;
+        objectUrl = URL.createObjectURL(blob);
+        setImageUrl(objectUrl);
+        setPreviewError("");
+      })
+      .catch((error) => {
+        if (!disposed) setPreviewError(error instanceof Error ? error.message : "Preview do OBS indisponível.");
+      });
+    return () => {
+      disposed = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [record.id]);
+
+  if (!frame || frame.width <= 0 || frame.height <= 0) return null;
+  return (
+    <div className="mb-4">
+      <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.06em] text-muted">
+        <span>Visão anotada</span><span>{entities.length} detecções</span>
+      </div>
+      {imageUrl ? (
+        <div className="relative overflow-hidden rounded-[6px] border border-border bg-black">
+          <img src={imageUrl} alt="Tela do Tibia com detecções" className="block h-auto w-full" />
+          {entities.map((entity) => {
+            const color = entityColor(entity.kind);
+            const left = clampPercent(entity.box.x / frame.width * 100);
+            const top = clampPercent(entity.box.y / frame.height * 100);
+            const width = Math.min(clampPercent(entity.box.width / frame.width * 100), 100 - left);
+            const height = Math.min(clampPercent(entity.box.height / frame.height * 100), 100 - top);
+            return (
+              <div key={entity.id} className="pointer-events-none absolute border-2" style={{ left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%`, borderColor: color }}>
+                <span className="absolute -top-5 left-[-2px] whitespace-nowrap rounded-sm px-1 py-0.5 text-[10px] font-semibold text-white" style={{ backgroundColor: color }}>
+                  {entity.label ?? entity.kind} {Math.round(entity.confidence * 100)}%
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : <div className="rounded border border-border p-3 text-[12px] text-muted">{previewError || "Carregando preview do OBS..."}</div>}
+      <p className="mt-1 text-[10px] text-muted">As caixas usam as coordenadas do último frame analisado.</p>
+    </div>
+  );
+}
+
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function entityColor(kind: string): string {
+  if (kind === "player") return "#22c55e";
+  if (kind === "creature") return "#ef4444";
+  if (kind === "npc") return "#eab308";
+  if (kind === "player-summon") return "#3b82f6";
+  return "#a855f7";
 }
 
 function formatStamina(minutes: number): string {

@@ -5,5 +5,10 @@ export interface PerceptionEvent {
   readonly sourceComputerId: string;
   readonly receivedAt: string;
   readonly capturedAt: string;
+  readonly frame: {
+    readonly id: string;
+    readonly width: number;
+    readonly height: number;
+  };
   readonly entities: readonly GameEntity[];
 }

@@ -24,6 +24,8 @@ describe("live decision monitor", () => {
       entityCounts: { player: 1, creature: 2, npc: 0 }
     });
     expect(decision.perceptionConfidence).toBeCloseTo(0.8);
+    expect(decision.frame).toEqual({ id: "frame-1", width: 1920, height: 1080 });
+    expect(decision.entities[0]).toMatchObject({ kind: "player", confidence: 0.9, box: { x: 0, y: 0, width: 10, height: 10 } });
   });
 
   it("labels produced commands as suggestions, not executed actions", () => {
@@ -63,6 +65,7 @@ function sampleEvent(): PerceptionEvent {
     sourceComputerId: "pc-main",
     receivedAt: observedAt,
     capturedAt: observedAt,
+    frame: { id: "frame-1", width: 1920, height: 1080 },
     entities: [
       { id: "player", kind: "player", confidence: 0.9, box: { x: 0, y: 0, width: 10, height: 10 }, sourceComputerId: "pc-main", observedAt },
       { id: "creature-1", kind: "creature", confidence: 0.8, box: { x: 10, y: 0, width: 10, height: 10 }, sourceComputerId: "pc-main", observedAt },

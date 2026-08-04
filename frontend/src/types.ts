@@ -276,6 +276,14 @@ export interface LiveDecisionRecord {
   decision: string;
   reasons: string[];
   perceptionConfidence: number | null;
+  frame?: { id: string; width: number; height: number } | null;
+  entities?: Array<{
+    id: string;
+    kind: "player" | "creature" | "npc" | "player-summon" | "unknown";
+    confidence: number;
+    label?: string;
+    box: { x: number; y: number; width: number; height: number };
+  }>;
   entityCounts: {
     player: number;
     creature: number;

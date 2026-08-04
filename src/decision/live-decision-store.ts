@@ -2,7 +2,7 @@ import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/pr
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { PerceptionEvent } from "../coordination/perception-event.js";
-import type { GameEntityKind } from "../core/game-entity.js";
+import type { GameEntity, GameEntityKind } from "../core/game-entity.js";
 import type { InputCommand } from "../core/input-command.js";
 
 export interface LiveDecisionRecord {
@@ -15,6 +15,8 @@ export interface LiveDecisionRecord {
   readonly decision: string;
   readonly reasons: readonly string[];
   readonly perceptionConfidence: number | null;
+  readonly frame: { readonly id: string; readonly width: number; readonly height: number } | null;
+  readonly entities: readonly GameEntity[];
   readonly entityCounts: Readonly<Record<GameEntityKind, number>>;
   readonly commands: readonly InputCommand[];
   readonly error: string | null;
@@ -57,6 +59,8 @@ export function decisionFrom(
       ? ["A estratégia produziu comandos candidatos.", "Execução automática não está conectada a este monitor."]
       : ["Estratégia passiva em modo de observação.", "Nenhum comando foi produzido neste ciclo."],
     perceptionConfidence: confidence,
+    frame: event.frame,
+    entities: event.entities,
     entityCounts,
     commands,
     error: null
@@ -74,6 +78,8 @@ export function errorDecision(sourceComputerId: string, strategy: string, error:
     decision: "Falha ao avaliar o frame",
     reasons: ["O ciclo foi interrompido antes de produzir uma decisão."],
     perceptionConfidence: null,
+    frame: null,
+    entities: [],
     entityCounts: { ...EMPTY_COUNTS },
     commands: [],
     error: error instanceof Error ? error.message : String(error)
