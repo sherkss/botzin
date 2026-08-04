@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TIBIA_SPELL_CATALOG } from "../../src/learning/tibia-spell-catalog.generated.js";
-import { parseSpellTable } from "../../src/learning/tibia-spell-catalog.js";
+import { parseSpellDetail, parseSpellTable } from "../../src/learning/tibia-spell-catalog.js";
 
 describe("official Tibia spell catalog", () => {
   it("contains the complete current catalog with unique ids and all five vocations", () => {
@@ -46,7 +46,18 @@ describe("official Tibia spell catalog", () => {
       requiredLevel: 12,
       manaCost: 50,
       manaText: "50",
-      premium: false
+      premium: false,
+      description: null, cooldownSeconds: null, groupCooldownSeconds: null, soulPoints: null, amount: null,
+      runeVocations: [], runeGroup: null, runeRequiredLevel: null, runeMagicLevel: null
     }]);
+  });
+
+  it("keeps rune creation and use requirements separate", () => {
+    expect(TIBIA_SPELL_CATALOG.find((spell) => spell.name === "Magic Wall Rune")).toMatchObject({
+      manaCost: 750, soulPoints: 5, amount: 3, cooldownSeconds: 2, runeGroup: "attack", runeRequiredLevel: 32,
+      runeVocations: ["druid", "knight", "paladin", "sorcerer", "monk"]
+    });
+    const html = '<H2>Magic Wall Rune</H2>Creates a wall.<BR><div class="TableContainer"><div>Spell Information</div><TR><TD>Cooldown:</TD><TD>2s (Group: 2s)</TD></TR><TR><TD>Soul Points:</TD><TD>5</TD></TR><TR><TD>Amount:</TD><TD>3</TD></TR><div>Rune Information</div><TR><TD>Vocation:</TD><TD>Knight, Druid, Monk, Paladin, Sorcerer</TD></TR><TR><TD>Group:</TD><TD>Attack</TD></TR><TR><TD>Exp Lvl:</TD><TD>32</TD></TR><TR><TD>Mag Lvl:</TD><TD>9</TD></TR>';
+    expect(parseSpellDetail(html)).toMatchObject({ soulPoints: 5, amount: 3, runeRequiredLevel: 32, runeMagicLevel: 9 });
   });
 });

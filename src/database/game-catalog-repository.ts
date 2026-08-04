@@ -21,6 +21,16 @@ export interface CreatureCatalogRecord {
   readonly seesInvisible: boolean;
   readonly lootable: boolean;
   readonly loot: readonly string[];
+  readonly armor: number;
+  readonly mitigation: number;
+  readonly maxDamage: number;
+  readonly damageByType: Readonly<Record<string, number>>;
+  readonly damageModifiers: Readonly<Record<string, number>>;
+  readonly attacks: readonly { name: string; element: string; minimum: number; maximum: number }[];
+  readonly location: string | null;
+  readonly lootDetails: readonly { itemName: string; amount: string | null; rarity: string | null }[];
+  readonly communitySourceUrl: string | null;
+  readonly communitySourceUpdatedAt: string | null;
   readonly sourceUrl: string;
 }
 
@@ -75,8 +85,8 @@ export class GameCatalogRepository {
 
   async searchCreatures(query: string, limit: number, offset: number): Promise<CatalogPage<CreatureCatalogRecord>> {
     const pattern = `%${escapeLike(query)}%`;
-    const where = query ? "WHERE name LIKE ? ESCAPE '\\\\' OR race LIKE ? ESCAPE '\\\\'" : "";
-    const parameters = query ? [pattern, pattern] : [];
+    const where = query ? "WHERE name LIKE ? ESCAPE '\\\\' OR race LIKE ? ESCAPE '\\\\' OR location LIKE ? ESCAPE '\\\\' OR CAST(loot_details_json AS CHAR) LIKE ? ESCAPE '\\\\'" : "";
+    const parameters = query ? [pattern, pattern, pattern, pattern] : [];
     const [countRows] = await this.pool.query<Array<RowDataPacket & { total: number }>>(
       `SELECT COUNT(*) AS total FROM bot_creature_catalog ${where}`,
       parameters
@@ -86,7 +96,10 @@ export class GameCatalogRepository {
               CAST(immune_json AS CHAR) AS immune_json, CAST(strong_json AS CHAR) AS strong_json,
               CAST(weakness_json AS CHAR) AS weakness_json, CAST(healed_json AS CHAR) AS healed_json,
               can_be_paralysed, can_be_summoned, summoned_mana, can_be_convinced, convinced_mana,
-              sees_invisible, lootable, CAST(loot_json AS CHAR) AS loot_json, source_url
+              sees_invisible, lootable, CAST(loot_json AS CHAR) AS loot_json, armor, mitigation, max_damage,
+              CAST(damage_by_type_json AS CHAR) AS damage_by_type_json, CAST(damage_modifiers_json AS CHAR) AS damage_modifiers_json,
+              CAST(attacks_json AS CHAR) AS attacks_json, location, CAST(loot_details_json AS CHAR) AS loot_details_json,
+              community_source_url, community_source_updated_at, source_url
          FROM bot_creature_catalog ${where} ORDER BY name LIMIT ? OFFSET ?`,
       [...parameters, limit, offset]
     );
@@ -165,7 +178,12 @@ function mapCreature(row: RowDataPacket): CreatureCatalogRecord {
     canBeParalysed: Boolean(row.can_be_paralysed), canBeSummoned: Boolean(row.can_be_summoned),
     summonedMana: Number(row.summoned_mana), canBeConvinced: Boolean(row.can_be_convinced),
     convincedMana: Number(row.convinced_mana), seesInvisible: Boolean(row.sees_invisible),
-    lootable: Boolean(row.lootable), loot: jsonStringArray(row.loot_json), sourceUrl: String(row.source_url)
+    lootable: Boolean(row.lootable), loot: jsonStringArray(row.loot_json), armor: Number(row.armor), mitigation: Number(row.mitigation),
+    maxDamage: Number(row.max_damage), damageByType: jsonNumberObject(row.damage_by_type_json), damageModifiers: jsonNumberObject(row.damage_modifiers_json),
+    attacks: jsonArray(row.attacks_json) as CreatureCatalogRecord["attacks"], location: nullableString(row.location),
+    lootDetails: jsonArray(row.loot_details_json) as CreatureCatalogRecord["lootDetails"],
+    communitySourceUrl: nullableString(row.community_source_url), communitySourceUpdatedAt: dateString(row.community_source_updated_at),
+    sourceUrl: String(row.source_url)
   };
 }
 
@@ -206,6 +224,15 @@ function jsonObject(value: unknown): Record<string, unknown> {
     const parsed: unknown = JSON.parse(value);
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
   } catch { return {}; }
+}
+
+function jsonArray(value: unknown): unknown[] {
+  if (typeof value !== "string") return [];
+  try { const parsed: unknown = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+}
+
+function jsonNumberObject(value: unknown): Record<string, number> {
+  return Object.fromEntries(Object.entries(jsonObject(value)).filter((entry): entry is [string, number] => typeof entry[1] === "number"));
 }
 
 function nullableString(value: unknown): string | null {

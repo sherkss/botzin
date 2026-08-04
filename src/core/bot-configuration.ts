@@ -51,6 +51,20 @@ export interface BotSkill {
   readonly enabled: boolean;
 }
 
+export interface BotClientSpellBinding {
+  readonly id: number;
+  readonly characterId: number;
+  readonly skillId: number;
+  readonly hotkey: string;
+  readonly multiActionSlot: 1 | 2 | 3;
+  readonly castMode: "hotkey" | "spell-words";
+  readonly targetMode: "self" | "current-target" | "crosshair";
+  readonly requireGameFocus: boolean;
+  readonly lastVerifiedAt: string | null;
+  readonly notes: string | null;
+  readonly enabled: boolean;
+}
+
 export interface BotHuntAssignment {
   readonly id: number;
   readonly machineId: number;
@@ -187,6 +201,7 @@ export interface BotConfigurationSnapshot {
   readonly machines: readonly BotMachine[];
   readonly hunts: readonly BotHunt[];
   readonly skills: readonly BotSkill[];
+  readonly clientSpellBindings: readonly BotClientSpellBinding[];
   readonly assignments: readonly BotHuntAssignment[];
   readonly huntSkillRules: readonly BotHuntSkillRule[];
   readonly huntTelemetry: readonly BotHuntTelemetry[];

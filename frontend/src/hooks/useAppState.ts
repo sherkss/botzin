@@ -8,6 +8,7 @@ const EMPTY: AppState = {
   machines: [],
   hunts: [],
   skills: [],
+  clientSpellBindings: [],
   assignments: [],
   huntSkillRules: [],
   huntTelemetry: [],

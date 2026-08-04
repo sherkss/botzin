@@ -1,6 +1,7 @@
 export type InputCommandType =
   | "keyboard-press"
   | "keyboard-release"
+  | "keyboard-type"
   | "mouse-move"
   | "mouse-click";
 

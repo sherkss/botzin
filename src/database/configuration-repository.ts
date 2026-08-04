@@ -3,6 +3,7 @@ import { ValidationError } from "../core/errors.js";
 import type {
   BotAccount,
   BotCharacter,
+  BotClientSpellBinding,
   BotConfigurationSnapshot,
   BotHunt,
   BotHuntAssignment,
@@ -28,6 +29,7 @@ export class ConfigurationRepository {
       machines,
       hunts,
       skills,
+      clientSpellBindings,
       assignments,
       huntSkillRules,
       huntTelemetry,
@@ -43,6 +45,7 @@ export class ConfigurationRepository {
       this.listMachines(),
       this.listHunts(),
       this.listSkills(),
+      this.listClientSpellBindings(),
       this.listAssignments(),
       this.listHuntSkillRules(),
       this.listHuntTelemetry(),
@@ -60,6 +63,7 @@ export class ConfigurationRepository {
       machines,
       hunts,
       skills,
+      clientSpellBindings,
       assignments,
       huntSkillRules,
       huntTelemetry,
@@ -183,6 +187,37 @@ export class ConfigurationRepository {
       ]
     );
     return this.getSkill(result.insertId);
+  }
+
+  async listClientSpellBindings(): Promise<readonly BotClientSpellBinding[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      "SELECT id, character_id, skill_id, hotkey, multi_action_slot, cast_mode, target_mode, require_game_focus, last_verified_at, notes, enabled FROM bot_client_spell_bindings ORDER BY character_id, hotkey, multi_action_slot"
+    );
+    return rows.map(mapClientSpellBinding);
+  }
+
+  async createClientSpellBinding(input: Record<string, unknown>): Promise<BotClientSpellBinding> {
+    const castMode = enumValue(input.castMode, ["hotkey", "spell-words"] as const, "hotkey", "castMode");
+    const hotkey = requiredString(input.hotkey, "hotkey");
+    const multiActionSlot = integerValue(input.multiActionSlot, 1, "multiActionSlot");
+    if (![1, 2, 3].includes(multiActionSlot)) throw new ValidationError('Field "multiActionSlot" must be 1, 2 or 3.');
+    if (!isSafeHotkey(hotkey)) throw new ValidationError('Field "hotkey" contains an unsupported key combination.');
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      "INSERT INTO bot_client_spell_bindings (character_id, skill_id, hotkey, multi_action_slot, cast_mode, target_mode, require_game_focus, last_verified_at, notes, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        requiredNumber(input.characterId, "characterId"),
+        requiredNumber(input.skillId, "skillId"),
+        hotkey.toUpperCase(),
+        multiActionSlot,
+        castMode,
+        enumValue(input.targetMode, ["self", "current-target", "crosshair"] as const, "current-target", "targetMode"),
+        booleanValue(input.requireGameFocus, true),
+        nullableDateTime(input.lastVerifiedAt, "lastVerifiedAt"),
+        nullableString(input.notes),
+        booleanValue(input.enabled, true)
+      ]
+    );
+    return this.getClientSpellBinding(result.insertId);
   }
 
   async listAssignments(): Promise<readonly BotHuntAssignment[]> {
@@ -496,6 +531,14 @@ export class ConfigurationRepository {
     return mapSingle(rows, mapSkill);
   }
 
+  private async getClientSpellBinding(id: number): Promise<BotClientSpellBinding> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT id, character_id, skill_id, hotkey, multi_action_slot, cast_mode, target_mode, require_game_focus, last_verified_at, notes, enabled FROM bot_client_spell_bindings WHERE id = ?",
+      [id]
+    );
+    return mapSingle(rows, mapClientSpellBinding);
+  }
+
   private async getAssignment(id: number): Promise<BotHuntAssignment> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       "SELECT id, machine_id, character_id, hunt_id, status, priority, notes FROM bot_hunt_assignments WHERE id = ?",
@@ -625,6 +668,22 @@ function mapSkill(row: RowDataPacket): BotSkill {
       .map((item) => item.trim())
       .filter(Boolean),
     cooldownMs: Number(row.cooldown_ms),
+    notes: nullableRowString(row.notes),
+    enabled: Boolean(row.enabled)
+  };
+}
+
+function mapClientSpellBinding(row: RowDataPacket): BotClientSpellBinding {
+  return {
+    id: Number(row.id),
+    characterId: Number(row.character_id),
+    skillId: Number(row.skill_id),
+    hotkey: String(row.hotkey),
+    multiActionSlot: Number(row.multi_action_slot) as BotClientSpellBinding["multiActionSlot"],
+    castMode: row.cast_mode as BotClientSpellBinding["castMode"],
+    targetMode: row.target_mode as BotClientSpellBinding["targetMode"],
+    requireGameFocus: Boolean(row.require_game_focus),
+    lastVerifiedAt: row.last_verified_at ? new Date(row.last_verified_at as string).toISOString() : null,
     notes: nullableRowString(row.notes),
     enabled: Boolean(row.enabled)
   };
@@ -865,6 +924,18 @@ function nullableFiniteNumber(value: unknown, field: string): number | null {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) throw new ValidationError(`Field "${field}" must be a number.`);
   return parsed;
+}
+
+function nullableDateTime(value: unknown, field: string): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    throw new ValidationError(`Field "${field}" must be a valid date.`);
+  }
+  return new Date(value).toISOString().slice(0, 19).replace("T", " ");
+}
+
+function isSafeHotkey(value: string): boolean {
+  return /^(?:(?:CTRL|ALT|SHIFT)\+){0,3}(?:F(?:[1-9]|1[0-2])|[A-Z0-9]|NUM(?:[0-9]|PLUS|MINUS|MULTIPLY|DIVIDE))$/i.test(value.trim());
 }
 
 function enumValue<const T extends readonly string[]>(

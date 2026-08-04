@@ -44,6 +44,19 @@ export interface Skill {
   enabled?: boolean;
 }
 
+export interface ClientSpellBinding {
+  id: number;
+  characterId: number;
+  skillId: number;
+  hotkey: string;
+  multiActionSlot: 1 | 2 | 3;
+  castMode: "hotkey" | "spell-words";
+  targetMode: "self" | "current-target" | "crosshair";
+  requireGameFocus: boolean;
+  lastVerifiedAt: string | null;
+  enabled: boolean;
+}
+
 export interface Assignment {
   id: number;
   machineId: number;
@@ -108,6 +121,16 @@ export interface CreatureCatalogRecord {
   seesInvisible: boolean;
   lootable: boolean;
   loot: string[];
+  armor: number;
+  mitigation: number;
+  maxDamage: number;
+  damageByType: Record<string, number>;
+  damageModifiers: Record<string, number>;
+  attacks: Array<{ name: string; element: string; minimum: number; maximum: number }>;
+  location: string | null;
+  lootDetails: Array<{ itemName: string; amount: string | null; rarity: string | null }>;
+  communitySourceUrl: string | null;
+  communitySourceUpdatedAt: string | null;
   sourceUrl: string;
 }
 
@@ -218,6 +241,10 @@ export interface KnowledgeSearchResult {
   endSeconds: number;
   text: string;
   reviewed: boolean;
+  publishedAt?: string | null;
+  gameVersion?: string | null;
+  freshness?: "current" | "legacy" | "unknown";
+  freshnessWarning?: string | null;
   score: number;
 }
 
@@ -254,6 +281,7 @@ export interface AppState {
   machines: Machine[];
   hunts: Hunt[];
   skills: Skill[];
+  clientSpellBindings: ClientSpellBinding[];
   assignments: Assignment[];
   huntSkillRules: HuntSkillRule[];
   huntTelemetry: HuntTelemetry[];

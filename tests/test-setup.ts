@@ -31,6 +31,7 @@ const DATA_TABLES = [
   "bot_learning_sessions",
   "bot_learning_method_sources",
   "bot_hunt_skill_rules",
+  "bot_client_spell_bindings",
   "bot_hunt_telemetry",
   "bot_hunt_assignments",
   "bot_creature_catalog",

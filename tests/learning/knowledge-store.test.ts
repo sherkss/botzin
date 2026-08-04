@@ -89,6 +89,19 @@ bem-vindos ao Tibia neste guia
     const results = await store.search("hunt hunt hunt");
     expect(results.map((result) => result.id)).toEqual(["video-1:10"]);
   });
+
+  it("ranks post-update knowledge above legacy material and exposes the warning", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "botzin-knowledge-"));
+    temporaryDirectories.push(directory);
+    const store = new KnowledgeStore(directory);
+    const legacy = { ...sampleDocument(), videoId: "legacy", freshness: "legacy" as const, gameVersion: "12.90", reviewed: false };
+    const current = { ...sampleDocument(), videoId: "current", freshness: "current" as const, gameVersion: "15.30", reviewed: false };
+    await store.writeIndex([legacy, current]);
+
+    const results = await store.search("suprimentos");
+    expect(results.map((result) => result.videoId)).toEqual(["current", "legacy"]);
+    expect(results[1]?.freshnessWarning).toContain("validação pós-update");
+  });
 });
 
 function sampleDocument(): KnowledgeDocument {

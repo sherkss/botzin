@@ -18,6 +18,29 @@ export interface TibiaCreatureCatalogEntry {
   readonly seesInvisible: boolean;
   readonly lootable: boolean;
   readonly loot: readonly string[];
+  readonly armor: number;
+  readonly mitigation: number;
+  readonly maxDamage: number;
+  readonly damageByType: Readonly<Record<string, number>>;
+  readonly damageModifiers: Readonly<Record<string, number>>;
+  readonly attacks: readonly TibiaCreatureAttack[];
+  readonly location: string;
+  readonly lootDetails: readonly TibiaCreatureLootDrop[];
+  readonly communitySourceUrl: string | null;
+  readonly communitySourceUpdatedAt: string | null;
+}
+
+export interface TibiaCreatureAttack {
+  readonly name: string;
+  readonly element: string;
+  readonly minimum: number;
+  readonly maximum: number;
+}
+
+export interface TibiaCreatureLootDrop {
+  readonly itemName: string;
+  readonly amount: string | null;
+  readonly rarity: string | null;
 }
 
 export interface TibiaItemCatalogEntry {
@@ -50,20 +73,26 @@ interface ItemPageResponse {
 
 const OFFICIAL_CREATURES_URL = "https://api.tibiadata.com/v4/creatures";
 const ITEM_API_URL = "https://tibiadata.bytewizards.de/api/v1/items";
+const COMMUNITY_CREATURE_API_URL = "https://tibiadata.bytewizards.de/api/v1/creatures";
 
 export async function fetchOfficialCreatureCatalog(
   fetchJson: (url: string) => Promise<unknown> = fetchJsonWithRetry,
-  concurrency = 12
+  concurrency = 12,
+  fetchCommunityJson: (url: string) => Promise<unknown> = fetchJsonWithRetry
 ): Promise<readonly TibiaCreatureCatalogEntry[]> {
   const overview = await fetchJson(OFFICIAL_CREATURES_URL) as OfficialCreatureOverviewResponse;
   const races = (overview.creatures?.creature_list ?? [])
     .map((entry) => stringValue(entry.race))
     .filter((race): race is string => Boolean(race));
   if (races.length < 600) throw new Error(`Official creature catalog returned only ${races.length} entries.`);
+  const communityIndex = await fetchCommunityCreatureIndex(fetchCommunityJson).catch(() => new Map<string, number>());
 
   const details = await concurrentMap(races, concurrency, async (race) => {
-    const response = await fetchJson(`${OFFICIAL_CREATURES_URL.replace(/s$/, "")}/${encodeURIComponent(race)}`) as OfficialCreatureDetailResponse;
-    return parseOfficialCreature(response.creature, race);
+    const [response, community] = await Promise.all([
+      fetchJson(`${OFFICIAL_CREATURES_URL.replace(/s$/, "")}/${encodeURIComponent(race)}`) as Promise<OfficialCreatureDetailResponse>,
+      fetchCommunityCreature(fetchCommunityJson, race, communityIndex)
+    ]);
+    return enrichCreature(parseOfficialCreature(response.creature, race), community, race);
   });
   return details.sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -105,8 +134,114 @@ export function parseOfficialCreature(value: unknown, fallbackRace: string): Tib
     convincedMana: nonNegativeNumber(creature.convinced_mana),
     seesInvisible: booleanValue(creature.see_invisible),
     lootable: booleanValue(creature.is_lootable),
-    loot: stringArray(creature.loot_list).map(decodeHtml)
+    loot: stringArray(creature.loot_list).map(decodeHtml),
+    armor: 0,
+    mitigation: 0,
+    maxDamage: 0,
+    damageByType: {},
+    damageModifiers: {},
+    attacks: [],
+    location: "",
+    lootDetails: [],
+    communitySourceUrl: null,
+    communitySourceUpdatedAt: null
   };
+}
+
+export function enrichCreature(
+  creature: TibiaCreatureCatalogEntry,
+  value: unknown,
+  sourceName = creature.race
+): TibiaCreatureCatalogEntry {
+  const detail = objectValue(value);
+  const structured = objectValue(detail.structuredData);
+  const infobox = objectValue(structured.infobox);
+  const combat = objectValue(structured.combatProperties);
+  const damageByType = parseMaxDamage(stringValue(infobox.maxDamage) ?? "");
+  const damageModifiers = percentRecord(objectValue(structured.resistanceSummary));
+  const lootDetails = arrayValue(detail.lootStatistics).map((raw) => {
+    const drop = objectValue(raw);
+    const itemName = stringValue(drop.itemName);
+    return itemName ? {
+      itemName: decodeHtml(itemName),
+      amount: stringValue(drop.chance),
+      rarity: stringValue(drop.rarity)
+    } : null;
+  }).filter((drop): drop is TibiaCreatureLootDrop => drop !== null);
+  return {
+    ...creature,
+    armor: nonNegativeNumber(combat.armor),
+    mitigation: nonNegativeNumber(combat.mitigation),
+    maxDamage: Object.values(damageByType).reduce((sum, damage) => sum + damage, 0),
+    damageByType,
+    damageModifiers,
+    attacks: parseCreatureAttacks(stringValue(infobox.abilities) ?? ""),
+    location: cleanCommunityText(stringValue(infobox.location) ?? ""),
+    lootDetails,
+    communitySourceUrl: `${COMMUNITY_CREATURE_API_URL}/${encodeURIComponent(nonNegativeNumber(detail.id) || sourceName)}`,
+    communitySourceUpdatedAt: stringValue(detail.lastUpdated)
+  };
+}
+
+export function parseCreatureAttacks(abilities: string): readonly TibiaCreatureAttack[] {
+  const attacks: TibiaCreatureAttack[] = [];
+  for (const match of abilities.matchAll(/\{\{Melee\|(\d+)-(\d+)/gi)) {
+    attacks.push({ name: "Melee", element: "physical", minimum: Number(match[1]), maximum: Number(match[2]) });
+  }
+  for (const match of abilities.matchAll(/\{\{Ability\|([^|}\n]+)\|(\d+)-(\d+)((?:\|[^}]*)?)\}\}/gi)) {
+    const element = match[4]?.match(/\|element=([^|}\n]+)/i)?.[1]?.trim().toLowerCase() ?? "unknown";
+    attacks.push({ name: match[1]!.trim(), element, minimum: Number(match[2]), maximum: Number(match[3]) });
+  }
+  return attacks;
+}
+
+function parseMaxDamage(value: string): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const match of value.matchAll(/\|([a-z][a-z0-9]*)=(\d+)/gi)) result[match[1]!.toLowerCase()] = Number(match[2]);
+  return result;
+}
+
+function percentRecord(value: Record<string, unknown>): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (!key.endsWith("Percent") || !Number.isFinite(Number(raw))) continue;
+    result[key.slice(0, -"Percent".length)] = Number(raw);
+  }
+  return result;
+}
+
+function cleanCommunityText(value: string): string {
+  return decodeHtml(value).replace(/\[\[(?:[^\]|]+\|)?([^\]]+)\]\]/g, "$1").replace(/\{\{[^}]+\}\}/g, "").trim();
+}
+
+async function fetchCommunityCreature(fetchJson: (url: string) => Promise<unknown>, race: string, index: ReadonlyMap<string, number>): Promise<unknown> {
+  try {
+    const target = index.get(normalizeCreatureName(race)) ?? race;
+    return await fetchJson(`${COMMUNITY_CREATURE_API_URL}/${encodeURIComponent(target)}`);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchCommunityCreatureIndex(fetchJson: (url: string) => Promise<unknown>): Promise<Map<string, number>> {
+  const first = objectValue(await fetchJson(`${COMMUNITY_CREATURE_API_URL}?page=1&pageSize=100`));
+  const total = nonNegativeNumber(first.totalCount);
+  const pages = Math.max(1, Math.ceil(total / 100));
+  const responses = [first, ...await Promise.all(Array.from({ length: pages - 1 }, (_, index) =>
+    fetchJson(`${COMMUNITY_CREATURE_API_URL}?page=${index + 2}&pageSize=100`).then(objectValue)))];
+  const result = new Map<string, number>();
+  for (const response of responses) for (const raw of arrayValue(response.items)) {
+    const item = objectValue(raw); const name = stringValue(item.name); const id = nonNegativeNumber(item.id);
+    if (name && id) result.set(normalizeCreatureName(name), id);
+  }
+  return result;
+}
+
+export function normalizeCreatureName(value: string): string {
+  return value.toLowerCase().split(/\s+/).map((word) => word.endsWith("ies") ? `${word.slice(0, -3)}y`
+    : word.endsWith("ves") ? `${word.slice(0, -3)}f`
+    : /(ches|shes|xes|sses|zes)$/.test(word) ? word.slice(0, -2)
+    : word.length > 3 && word.endsWith("s") ? word.slice(0, -1) : word).join("").replace(/[^a-z0-9]/g, "");
 }
 
 export function parseItemPage(value: unknown): { page: number; pageSize: number; totalCount: number; items: TibiaItemCatalogEntry[] } {
@@ -173,6 +308,8 @@ async function concurrentMap<T, R>(values: readonly T[], concurrency: number, ma
 function objectValue(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
+
+function arrayValue(value: unknown): unknown[] { return Array.isArray(value) ? value : []; }
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;

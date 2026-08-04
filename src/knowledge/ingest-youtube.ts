@@ -10,6 +10,7 @@ import {
   type KnowledgeDocument,
   type TranscriptSegment
 } from "./knowledge-store.js";
+import { classifySourceFreshness, extractGameVersion } from "./source-freshness.js";
 
 interface VideoInfo {
   readonly id?: string;
@@ -18,11 +19,21 @@ interface VideoInfo {
   readonly original_url?: string;
   readonly playlist_id?: string;
   readonly language?: string;
+  readonly upload_date?: string;
+  readonly timestamp?: number;
+  readonly channel?: string;
+  readonly uploader?: string;
+  readonly uploader_id?: string;
 }
 
 interface WhisperOutput {
   readonly language?: string;
   readonly segments?: readonly { readonly start?: number; readonly end?: number; readonly text?: string }[];
+}
+
+interface FlatPlaylistInfo {
+  readonly id?: string;
+  readonly entries?: readonly VideoInfo[];
 }
 
 interface IngestOptions {
@@ -32,6 +43,9 @@ interface IngestOptions {
   readonly whisperModel: string;
   readonly pythonCommand: string;
   readonly indexOnly: boolean;
+  readonly currentGameVersion: string | null;
+  readonly legacyBefore: string | null;
+  readonly metadataOnly: boolean;
 }
 
 const defaultKnowledgeDir = resolve(fileURLToPath(new URL("../../storage/knowledge", import.meta.url)));
@@ -53,11 +67,19 @@ async function main(): Promise<void> {
     return;
   }
 
+  const manifestDocuments: KnowledgeDocument[] = [];
   for (const playlist of options.playlists) {
     console.log(`[knowledge] Baixando metadados e legendas: ${playlist}`);
+    if (options.metadataOnly && isYoutubeChannelUrl(playlist)) {
+      manifestDocuments.push(...await documentsFromChannelManifest(playlist, options));
+      continue;
+    }
+    const subtitleArguments = options.metadataOnly
+      ? []
+      : ["--write-subs", "--write-auto-subs", "--sub-langs", "pt-orig,pt", "--sub-format", "vtt"];
     await run(options.pythonCommand, [
       "-m", "yt_dlp", "--ignore-errors", "--skip-download", "--write-info-json",
-      "--write-subs", "--write-auto-subs", "--sub-langs", "pt-orig,pt", "--sub-format", "vtt",
+      ...(options.metadataOnly ? ["--flat-playlist"] : []), ...subtitleArguments,
       "--no-overwrites", "--output", join(rawDir, "%(playlist_id)s", "%(playlist_index)03d-%(id)s.%(ext)s"),
       playlist
     ]);
@@ -71,6 +93,7 @@ async function main(): Promise<void> {
   const documentsById = new Map<string, KnowledgeDocument>();
   const baseline = curatedBaseline();
   documentsById.set(baseline.videoId, baseline);
+  for (const document of manifestDocuments) documentsById.set(document.videoId, document);
   let skipped = 0;
   for (const infoPath of infoPaths) {
     if (basename(infoPath).startsWith("000-")) continue;
@@ -90,9 +113,39 @@ async function main(): Promise<void> {
   console.log(`[knowledge] Arquivos: ${options.knowledgeDir}`);
 }
 
+async function documentsFromChannelManifest(url: string, options: IngestOptions): Promise<KnowledgeDocument[]> {
+  const output = await runCapture(options.pythonCommand, [
+    "-m", "yt_dlp", "--flat-playlist", "--dump-single-json", "--ignore-errors", url
+  ]);
+  const manifest = JSON.parse(output) as FlatPlaylistInfo;
+  return (manifest.entries ?? []).flatMap((entry) => {
+    if (!entry.id || !entry.title || !isSupportedTibiaHuntLevel(entry.title)) return [];
+    const publishedAt = videoPublishedAt(entry);
+    const gameVersion = extractGameVersion(entry.title);
+    return [{
+      videoId: entry.id,
+      title: entry.title,
+      url: entry.webpage_url ?? entry.original_url ?? `https://www.youtube.com/watch?v=${entry.id}`,
+      playlistId: entry.playlist_id ?? manifest.id ?? null,
+      language: "pt-BR",
+      reviewed: false,
+      publishedAt,
+      gameVersion,
+      freshness: classifySourceFreshness({
+        gameVersion,
+        currentGameVersion: options.currentGameVersion,
+        publishedAt,
+        legacyBefore: options.legacyBefore
+      }),
+      segments: [{ startSeconds: 0, endSeconds: 1, text: `[Metadados do vídeo] ${entry.title}` }]
+    } satisfies KnowledgeDocument];
+  });
+}
+
 async function documentFromVideo(infoPath: string, options: IngestOptions): Promise<KnowledgeDocument | null> {
   const info = JSON.parse(await readFile(infoPath, "utf8")) as VideoInfo;
   if (!info.id) return null;
+  if (isTibiaHuntVideo(info) && !isSupportedTibiaHuntLevel(info.title ?? "")) return null;
 
   const stem = basename(infoPath).replace(/\.info\.json$/i, "");
   const siblingFiles = await listFilesRecursive(dirname(infoPath), ".vtt");
@@ -112,8 +165,12 @@ async function documentFromVideo(infoPath: string, options: IngestOptions): Prom
   }
 
   if (segments.length === 0) {
-    console.warn(`[knowledge] Sem texto: ${info.id} — ${info.title ?? "sem título"}`);
-    return null;
+    const title = info.title?.trim();
+    if (!title) {
+      console.warn(`[knowledge] Sem texto: ${info.id} — sem título`);
+      return null;
+    }
+    segments = [{ startSeconds: 0, endSeconds: 1, text: `[Metadados do vídeo] ${title}` }];
   }
 
   const document: KnowledgeDocument = {
@@ -123,6 +180,14 @@ async function documentFromVideo(infoPath: string, options: IngestOptions): Prom
     playlistId: info.playlist_id ?? null,
     language,
     reviewed: false,
+    publishedAt: videoPublishedAt(info),
+    gameVersion: extractGameVersion(info.title ?? ""),
+    freshness: classifySourceFreshness({
+      gameVersion: extractGameVersion(info.title ?? ""),
+      currentGameVersion: options.currentGameVersion,
+      publishedAt: videoPublishedAt(info),
+      legacyBefore: options.legacyBefore
+    }),
     segments
   };
   const normalizedDir = join(options.knowledgeDir, "transcripts");
@@ -184,7 +249,7 @@ function parseOptions(args: readonly string[]): IngestOptions {
   };
   const playlistArguments = args.filter((argument, index) => args[index - 1] === "--playlist" && argument);
   const seededPlaylists = BASIC_GAME_KNOWLEDGE
-    .filter((source) => source.metadata.kind === "playlist" && source.uri)
+    .filter((source) => (source.metadata.kind === "playlist" || source.metadata.kind === "channel") && source.uri)
     .map((source) => source.uri!);
   return {
     knowledgeDir: resolve(valueAfter("--output") ?? process.env.BOTZIN_KNOWLEDGE_DIR ?? defaultKnowledgeDir),
@@ -192,8 +257,27 @@ function parseOptions(args: readonly string[]): IngestOptions {
     whisperMissing: args.includes("--whisper-missing"),
     whisperModel: valueAfter("--whisper-model") ?? process.env.BOTZIN_WHISPER_MODEL ?? "small",
     pythonCommand: process.env.BOTZIN_PYTHON_COMMAND ?? "python",
-    indexOnly: args.includes("--index-only")
+    indexOnly: args.includes("--index-only"),
+    currentGameVersion: valueAfter("--current-version") ?? process.env.BOTZIN_TIBIA_VERSION ?? null,
+    legacyBefore: valueAfter("--legacy-before") ?? process.env.BOTZIN_KNOWLEDGE_LEGACY_BEFORE ?? null,
+    metadataOnly: args.includes("--metadata-only")
   };
+}
+
+function videoPublishedAt(info: VideoInfo): string | null {
+  if (info.upload_date && /^\d{8}$/.test(info.upload_date)) {
+    return `${info.upload_date.slice(0, 4)}-${info.upload_date.slice(4, 6)}-${info.upload_date.slice(6, 8)}`;
+  }
+  return typeof info.timestamp === "number" ? new Date(info.timestamp * 1000).toISOString().slice(0, 10) : null;
+}
+
+function isTibiaHuntVideo(info: VideoInfo): boolean {
+  const identity = `${info.channel ?? ""} ${info.uploader ?? ""} ${info.uploader_id ?? ""}`.toLowerCase();
+  return identity.replace(/\s+/g, "").includes("tibiahunt");
+}
+
+function isSupportedTibiaHuntLevel(title: string): boolean {
+  return /\b(?:EK|ED|MS|RP|EM)\s*\d{1,6}\b/i.test(title);
 }
 
 async function ensureTool(command: string, module: string, args: readonly string[]): Promise<void> {
@@ -210,6 +294,25 @@ async function run(command: string, args: readonly string[], showOutput = true):
     child.on("error", reject);
     child.on("exit", (code) => code === 0 ? resolvePromise() : reject(new Error(`${command} terminou com código ${code ?? "desconhecido"}.`)));
   });
+}
+
+async function runCapture(command: string, args: readonly string[]): Promise<string> {
+  return new Promise<string>((resolvePromise, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolvePromise(Buffer.concat(stdout).toString("utf8"));
+      else reject(new Error(`${command} terminou com código ${code ?? "desconhecido"}: ${Buffer.concat(stderr).toString("utf8").slice(-1000)}`));
+    });
+  });
+}
+
+function isYoutubeChannelUrl(value: string): boolean {
+  return /^https?:\/\/(?:www\.)?youtube\.com\/@[^/]+(?:\/videos)?/i.test(value);
 }
 
 function subtitleLanguage(path: string): string {

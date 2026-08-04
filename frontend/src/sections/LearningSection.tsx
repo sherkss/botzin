@@ -95,10 +95,15 @@ function KnowledgeExplorerCard({ cataloguedSources }: { cataloguedSources: numbe
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-[13px] font-semibold">{result.title}</h3>
                 <span className="text-[11px] text-muted">
-                  {formatKnowledgeTime(result.startSeconds)} {result.reviewed ? "• revisado" : "• transcrição não revisada"}
+                  {formatKnowledgeTime(result.startSeconds)} {result.gameVersion ? `• cliente ${result.gameVersion}` : ""} {result.reviewed ? "• revisado" : "• transcrição não revisada"}
                 </span>
               </div>
               <p className="mt-1 text-[12px] leading-5 text-muted">{result.text}</p>
+              {result.freshnessWarning && (
+                <p className="mt-2 rounded-[4px] border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-4 text-amber-200">
+                  {result.freshnessWarning}
+                </p>
+              )}
               {result.url && <a className="mt-2 inline-block text-[12px] text-accent hover:underline" href={result.url} target="_blank" rel="noreferrer">Abrir fonte no momento citado</a>}
             </article>
           ))}

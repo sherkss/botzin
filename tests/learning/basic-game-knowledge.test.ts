@@ -24,4 +24,10 @@ describe("basic game knowledge seed", () => {
     const keys = BASIC_GAME_KNOWLEDGE.map((source) => source.key);
     expect(new Set(keys).size).toBe(keys.length);
   });
+
+  it("includes TibiaHunt as a Global, historical and version-aware channel", () => {
+    const channel = BASIC_GAME_KNOWLEDGE.find((source) => source.key === "youtube-channel:tibiahunt");
+    expect(channel?.uri).toBe("https://www.youtube.com/@TibiaHunt/videos");
+    expect(channel?.metadata).toMatchObject({ globalOnly: true, historicalAllowed: true, versionAware: true });
+  });
 });

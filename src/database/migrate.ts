@@ -28,6 +28,32 @@ async function main(): Promise<void> {
   await pool.query("ALTER TABLE bot_learning_sources ALTER COLUMN trust_level SET DEFAULT 'low'");
   await pool.query("ALTER TABLE bot_skills MODIFY mana_cost INT UNSIGNED NULL DEFAULT 0");
   await pool.query("ALTER TABLE bot_game_knowledge MODIFY trust_level ENUM('official', 'community', 'user') NOT NULL");
+  const [multiActionColumns] = await pool.query<Array<RowDataPacket & { count: number }>>(
+    "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema=? AND table_name='bot_client_spell_bindings' AND column_name='multi_action_slot'",
+    [config.mysqlDatabase]
+  );
+  if (Number(multiActionColumns[0]?.count ?? 0) === 0) {
+    await pool.query("ALTER TABLE bot_client_spell_bindings ADD COLUMN multi_action_slot TINYINT UNSIGNED NOT NULL DEFAULT 1 AFTER hotkey");
+  }
+  const [multiActionIndexes] = await pool.query<Array<RowDataPacket & { count: number }>>(
+    "SELECT COUNT(*) AS count FROM information_schema.statistics WHERE table_schema=? AND table_name='bot_client_spell_bindings' AND index_name='uq_bot_client_spell_bindings_hotkey_slot'",
+    [config.mysqlDatabase]
+  );
+  if (Number(multiActionIndexes[0]?.count ?? 0) === 0) {
+    await pool.query("ALTER TABLE bot_client_spell_bindings ADD UNIQUE KEY uq_bot_client_spell_bindings_hotkey_slot (character_id, hotkey, multi_action_slot)");
+  }
+  const creatureColumns: Record<string, string> = {
+    armor: "INT UNSIGNED NOT NULL DEFAULT 0", mitigation: "DOUBLE NOT NULL DEFAULT 0", max_damage: "INT UNSIGNED NOT NULL DEFAULT 0",
+    damage_by_type_json: "JSON NULL", damage_modifiers_json: "JSON NULL", attacks_json: "JSON NULL", location: "TEXT NULL",
+    loot_details_json: "JSON NULL", community_source_url: "VARCHAR(500) NULL", community_source_updated_at: "DATETIME NULL"
+  };
+  for (const [column, definition] of Object.entries(creatureColumns)) {
+    const [columns] = await pool.query<Array<RowDataPacket & { count: number }>>(
+      "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema=? AND table_name='bot_creature_catalog' AND column_name=?",
+      [config.mysqlDatabase, column]
+    );
+    if (Number(columns[0]?.count ?? 0) === 0) await pool.query(`ALTER TABLE bot_creature_catalog ADD COLUMN \`${column}\` ${definition}`);
+  }
 
   const [indexRows] = await pool.query<Array<RowDataPacket & { count: number }>>(
     `SELECT COUNT(*) AS count

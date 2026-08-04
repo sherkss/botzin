@@ -1,5 +1,6 @@
 import { readFile, readdir, stat, writeFile, mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { freshnessWarning, type SourceFreshness } from "./source-freshness.js";
 
 export interface TranscriptSegment {
   readonly startSeconds: number;
@@ -14,6 +15,9 @@ export interface KnowledgeDocument {
   readonly playlistId: string | null;
   readonly language: string;
   readonly reviewed: boolean;
+  readonly publishedAt?: string | null;
+  readonly gameVersion?: string | null;
+  readonly freshness?: SourceFreshness;
   readonly segments: readonly TranscriptSegment[];
 }
 
@@ -26,6 +30,10 @@ export interface KnowledgeChunk {
   readonly endSeconds: number;
   readonly text: string;
   readonly reviewed: boolean;
+  readonly publishedAt?: string | null;
+  readonly gameVersion?: string | null;
+  readonly freshness?: SourceFreshness;
+  readonly freshnessWarning?: string | null;
 }
 
 export interface KnowledgeIndex {
@@ -104,7 +112,13 @@ export function chunksFor(document: KnowledgeDocument): KnowledgeChunk[] {
       startSeconds: first.startSeconds,
       endSeconds: last.endSeconds,
       text: pending.map((segment) => segment.text).join(" "),
-      reviewed: document.reviewed
+      reviewed: document.reviewed,
+      ...(document.publishedAt !== undefined ? { publishedAt: document.publishedAt } : {}),
+      ...(document.gameVersion !== undefined ? { gameVersion: document.gameVersion } : {}),
+      ...(document.freshness !== undefined ? {
+        freshness: document.freshness,
+        freshnessWarning: freshnessWarning(document.freshness, document.gameVersion)
+      } : {})
     });
     pending = [];
     length = 0;
@@ -128,6 +142,9 @@ export function markdownFor(document: KnowledgeDocument): string {
     `playlist_id: ${document.playlistId ?? ""}`,
     `idioma: ${document.language}`,
     `revisado: ${document.reviewed}`,
+    ...(document.publishedAt !== undefined ? [`publicado_em: ${document.publishedAt ?? ""}`] : []),
+    ...(document.gameVersion !== undefined ? [`versao_jogo: ${document.gameVersion ?? ""}`] : []),
+    ...(document.freshness !== undefined ? [`atualidade: ${document.freshness}`] : []),
     "---",
     ""
   ];
@@ -153,6 +170,7 @@ export function documentFromMarkdown(input: string): KnowledgeDocument | null {
     const text = section[3]?.trim().replace(/\s+/g, " ");
     if (text) segments.push({ startSeconds: parseTimestamp(section[1]!), endSeconds: parseTimestamp(section[2]!), text });
   }
+  const freshness = metadata.get("atualidade");
   return {
     videoId,
     title: parseJsonString(metadata.get("titulo")) ?? videoId,
@@ -160,6 +178,9 @@ export function documentFromMarkdown(input: string): KnowledgeDocument | null {
     playlistId: metadata.get("playlist_id") || null,
     language: metadata.get("idioma") ?? "pt-BR",
     reviewed: metadata.get("revisado") === "true",
+    ...(metadata.has("publicado_em") ? { publishedAt: metadata.get("publicado_em") || null } : {}),
+    ...(metadata.has("versao_jogo") ? { gameVersion: metadata.get("versao_jogo") || null } : {}),
+    ...(freshness === "current" || freshness === "legacy" || freshness === "unknown" ? { freshness } : {}),
     segments
   };
 }
@@ -250,7 +271,7 @@ function tokenize(value: string): string[] {
 function scoreChunk(chunk: KnowledgeChunk, terms: readonly string[]): number {
   const title = normalizeText(chunk.title);
   const text = normalizeText(chunk.text);
-  let score = chunk.reviewed ? 0.25 : 0;
+  let score = (chunk.reviewed ? 0.25 : 0) + (chunk.freshness === "current" ? 2 : chunk.freshness === "legacy" ? -0.5 : 0);
   let matchedTerms = 0;
   for (const term of terms) {
     let matched = false;

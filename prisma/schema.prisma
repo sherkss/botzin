@@ -26,6 +26,17 @@ enum SkillCategory {
   utility
 }
 
+enum SpellCastMode {
+  hotkey
+  spell_words @map("spell-words")
+}
+
+enum SpellTargetMode {
+  self
+  current_target @map("current-target")
+  crosshair
+}
+
 enum AssignmentStatus {
   planned
   active
@@ -140,19 +151,20 @@ model BotAccount {
 }
 
 model BotCharacter {
-  id              BigInt               @id @default(autoincrement()) @db.UnsignedBigInt
-  accountId       BigInt               @map("account_id") @db.UnsignedBigInt
-  name            String               @db.VarChar(120)
-  world           String?              @db.VarChar(80)
-  vocation        String?              @db.VarChar(80)
-  level           Int?                 @db.UnsignedInt
-  enabled         Boolean              @default(true)
-  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamp(0)
-  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamp(0)
-  account         BotAccount           @relation(fields: [accountId], references: [id], onDelete: Cascade, map: "fk_bot_characters_account")
-  assignments     BotHuntAssignment[]
-  learningMethods BotLearningMethod[]
-  huntTelemetry   BotHuntTelemetry[]
+  id                  BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
+  accountId           BigInt                  @map("account_id") @db.UnsignedBigInt
+  name                String                  @db.VarChar(120)
+  world               String?                 @db.VarChar(80)
+  vocation            String?                 @db.VarChar(80)
+  level               Int?                    @db.UnsignedInt
+  enabled             Boolean                 @default(true)
+  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt           DateTime                @updatedAt @map("updated_at") @db.Timestamp(0)
+  account             BotAccount              @relation(fields: [accountId], references: [id], onDelete: Cascade, map: "fk_bot_characters_account")
+  assignments         BotHuntAssignment[]
+  learningMethods     BotLearningMethod[]
+  huntTelemetry       BotHuntTelemetry[]
+  clientSpellBindings BotClientSpellBinding[]
 
   @@unique([accountId, name], map: "uq_bot_characters_account_name")
   @@map("bot_characters")
@@ -192,22 +204,45 @@ model BotHunt {
 }
 
 model BotSkill {
-  id               BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
-  name             String             @unique(map: "uq_bot_skills_name") @db.VarChar(140)
-  spellWords       String?            @map("spell_words") @db.VarChar(140)
-  hotkey           String?            @db.VarChar(40)
-  category         SkillCategory      @default(attack)
-  manaCost         Int?               @default(0) @map("mana_cost") @db.UnsignedInt
-  requiredLevel    Int                @default(0) @map("required_level") @db.UnsignedInt
-  allowedVocations String             @map("allowed_vocations") @db.VarChar(255)
-  cooldownMs       Int                @default(1000) @map("cooldown_ms") @db.UnsignedInt
-  notes            String?            @db.Text
-  enabled          Boolean            @default(true)
-  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamp(0)
-  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamp(0)
-  huntRules        BotHuntSkillRule[]
+  id                  BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
+  name                String                  @unique(map: "uq_bot_skills_name") @db.VarChar(140)
+  spellWords          String?                 @map("spell_words") @db.VarChar(140)
+  hotkey              String?                 @db.VarChar(40)
+  category            SkillCategory           @default(attack)
+  manaCost            Int?                    @default(0) @map("mana_cost") @db.UnsignedInt
+  requiredLevel       Int                     @default(0) @map("required_level") @db.UnsignedInt
+  allowedVocations    String                  @map("allowed_vocations") @db.VarChar(255)
+  cooldownMs          Int                     @default(1000) @map("cooldown_ms") @db.UnsignedInt
+  notes               String?                 @db.Text
+  enabled             Boolean                 @default(true)
+  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt           DateTime                @updatedAt @map("updated_at") @db.Timestamp(0)
+  huntRules           BotHuntSkillRule[]
+  clientSpellBindings BotClientSpellBinding[]
 
   @@map("bot_skills")
+}
+
+model BotClientSpellBinding {
+  id               BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+  characterId      BigInt          @map("character_id") @db.UnsignedBigInt
+  skillId          BigInt          @map("skill_id") @db.UnsignedBigInt
+  hotkey           String          @db.VarChar(40)
+  multiActionSlot  Int             @default(1) @map("multi_action_slot") @db.UnsignedTinyInt
+  castMode         SpellCastMode   @default(hotkey) @map("cast_mode")
+  targetMode       SpellTargetMode @default(current_target) @map("target_mode")
+  requireGameFocus Boolean         @default(true) @map("require_game_focus")
+  lastVerifiedAt   DateTime?       @map("last_verified_at") @db.DateTime(0)
+  notes            String?         @db.Text
+  enabled          Boolean         @default(true)
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamp(0)
+  character        BotCharacter    @relation(fields: [characterId], references: [id], onDelete: Cascade, map: "fk_bot_client_spell_bindings_character")
+  skill            BotSkill        @relation(fields: [skillId], references: [id], onDelete: Cascade, map: "fk_bot_client_spell_bindings_skill")
+
+  @@unique([characterId, skillId], map: "uq_bot_client_spell_bindings_character_skill")
+  @@unique([characterId, hotkey, multiActionSlot], map: "uq_bot_client_spell_bindings_hotkey_slot")
+  @@map("bot_client_spell_bindings")
 }
 
 enum GameKnowledgeTrust {
@@ -269,20 +304,20 @@ model BotItemCatalog {
 }
 
 model BotGameKnowledge {
-  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  knowledgeKey      String    @unique(map: "uq_bot_game_knowledge_key") @map("knowledge_key") @db.VarChar(255)
-  domain            String    @db.VarChar(80)
-  name              String    @db.VarChar(255)
-  summary           String?   @db.Text
-  content           String    @db.MediumText
-  metadataJson      Json?     @map("metadata_json")
-  sourceUrl         String    @map("source_url") @db.VarChar(500)
-  sourceUpdatedAt   DateTime? @map("source_updated_at")
+  id                BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
+  knowledgeKey      String             @unique(map: "uq_bot_game_knowledge_key") @map("knowledge_key") @db.VarChar(255)
+  domain            String             @db.VarChar(80)
+  name              String             @db.VarChar(255)
+  summary           String?            @db.Text
+  content           String             @db.MediumText
+  metadataJson      Json?              @map("metadata_json")
+  sourceUrl         String             @map("source_url") @db.VarChar(500)
+  sourceUpdatedAt   DateTime?          @map("source_updated_at")
   trustLevel        GameKnowledgeTrust @map("trust_level")
-  volatile          Boolean   @default(false)
-  sourceGeneratedAt DateTime  @map("source_generated_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+  volatile          Boolean            @default(false)
+  sourceGeneratedAt DateTime           @map("source_generated_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @default(now()) @updatedAt @map("updated_at")
 
   @@index([domain, name], map: "idx_bot_game_knowledge_domain_name")
   @@index([name], map: "idx_bot_game_knowledge_name")
@@ -290,18 +325,18 @@ model BotGameKnowledge {
 }
 
 model BotHuntAssignment {
-  id              BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
-  machineId       BigInt                 @map("machine_id") @db.UnsignedBigInt
-  characterId     BigInt                 @map("character_id") @db.UnsignedBigInt
-  huntId          BigInt                 @map("hunt_id") @db.UnsignedBigInt
-  status          AssignmentStatus       @default(planned)
-  priority        Int                    @default(100)
-  notes           String?                @db.Text
-  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamp(0)
-  updatedAt       DateTime               @updatedAt @map("updated_at") @db.Timestamp(0)
-  machine         BotMachine             @relation(fields: [machineId], references: [id], onDelete: Cascade, map: "fk_bot_hunt_assignments_machine")
-  character       BotCharacter           @relation(fields: [characterId], references: [id], onDelete: Cascade, map: "fk_bot_hunt_assignments_character")
-  hunt            BotHunt                @relation(fields: [huntId], references: [id], onDelete: Restrict, map: "fk_bot_hunt_assignments_hunt")
+  id              BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
+  machineId       BigInt                @map("machine_id") @db.UnsignedBigInt
+  characterId     BigInt                @map("character_id") @db.UnsignedBigInt
+  huntId          BigInt                @map("hunt_id") @db.UnsignedBigInt
+  status          AssignmentStatus      @default(planned)
+  priority        Int                   @default(100)
+  notes           String?               @db.Text
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamp(0)
+  machine         BotMachine            @relation(fields: [machineId], references: [id], onDelete: Cascade, map: "fk_bot_hunt_assignments_machine")
+  character       BotCharacter          @relation(fields: [characterId], references: [id], onDelete: Cascade, map: "fk_bot_hunt_assignments_character")
+  hunt            BotHunt               @relation(fields: [huntId], references: [id], onDelete: Restrict, map: "fk_bot_hunt_assignments_hunt")
   learningSession BotLearningSession[]
   feedback        BotDecisionFeedback[]
   huntTelemetry   BotHuntTelemetry[]
@@ -311,27 +346,27 @@ model BotHuntAssignment {
 }
 
 model BotHuntTelemetry {
-  id               BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
-  characterId      BigInt              @map("character_id") @db.UnsignedBigInt
-  huntId           BigInt              @map("hunt_id") @db.UnsignedBigInt
-  assignmentId     BigInt?             @map("assignment_id") @db.UnsignedBigInt
-  capturedAt       DateTime            @default(now()) @map("captured_at") @db.Timestamp(0)
-  durationSeconds  Int?                @map("duration_seconds") @db.UnsignedInt
-  xpRatePercent    Int                 @default(150) @map("xp_rate_percent") @db.UnsignedInt
-  xpGain           BigInt?             @map("xp_gain")
-  rawXpGain        BigInt?             @map("raw_xp_gain")
-  xpPerHour        BigInt?             @map("xp_per_hour")
-  rawXpPerHour     BigInt?             @map("raw_xp_per_hour")
-  lootValue        BigInt?             @map("loot_value")
-  suppliesValue    BigInt?             @map("supplies_value")
-  profit           BigInt?
-  creaturesJson    Json?               @map("creatures_json")
-  rawText          String?             @map("raw_text") @db.MediumText
-  source           HuntTelemetrySource @default(session_analyser)
-  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamp(0)
-  character        BotCharacter        @relation(fields: [characterId], references: [id], onDelete: Cascade, map: "fk_bot_hunt_telemetry_character")
-  hunt             BotHunt             @relation(fields: [huntId], references: [id], onDelete: Restrict, map: "fk_bot_hunt_telemetry_hunt")
-  assignment       BotHuntAssignment?  @relation(fields: [assignmentId], references: [id], onDelete: SetNull, map: "fk_bot_hunt_telemetry_assignment")
+  id              BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
+  characterId     BigInt              @map("character_id") @db.UnsignedBigInt
+  huntId          BigInt              @map("hunt_id") @db.UnsignedBigInt
+  assignmentId    BigInt?             @map("assignment_id") @db.UnsignedBigInt
+  capturedAt      DateTime            @default(now()) @map("captured_at") @db.Timestamp(0)
+  durationSeconds Int?                @map("duration_seconds") @db.UnsignedInt
+  xpRatePercent   Int                 @default(150) @map("xp_rate_percent") @db.UnsignedInt
+  xpGain          BigInt?             @map("xp_gain")
+  rawXpGain       BigInt?             @map("raw_xp_gain")
+  xpPerHour       BigInt?             @map("xp_per_hour")
+  rawXpPerHour    BigInt?             @map("raw_xp_per_hour")
+  lootValue       BigInt?             @map("loot_value")
+  suppliesValue   BigInt?             @map("supplies_value")
+  profit          BigInt?
+  creaturesJson   Json?               @map("creatures_json")
+  rawText         String?             @map("raw_text") @db.MediumText
+  source          HuntTelemetrySource @default(session_analyser)
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamp(0)
+  character       BotCharacter        @relation(fields: [characterId], references: [id], onDelete: Cascade, map: "fk_bot_hunt_telemetry_character")
+  hunt            BotHunt             @relation(fields: [huntId], references: [id], onDelete: Restrict, map: "fk_bot_hunt_telemetry_hunt")
+  assignment      BotHuntAssignment?  @relation(fields: [assignmentId], references: [id], onDelete: SetNull, map: "fk_bot_hunt_telemetry_assignment")
 
   @@index([characterId, capturedAt], map: "idx_bot_hunt_telemetry_character_time")
   @@index([huntId, capturedAt], map: "idx_bot_hunt_telemetry_hunt_time")
@@ -383,33 +418,33 @@ model BotLearningMethod {
 }
 
 model BotLearningSource {
-  id          BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
-  name        String                    @db.VarChar(160)
-  sourceType  LearningSourceType        @map("source_type")
-  uri         String?                   @db.Text
-  contentHash String?                   @unique(map: "uq_bot_learning_sources_content_hash") @map("content_hash") @db.VarChar(128)
-  language    String?                   @db.VarChar(16)
-  status      LearningSourceStatus      @default(pending)
-  trustLevel  TrustLevel                @default(low) @map("trust_level")
-  capturedAt  DateTime?                 @map("captured_at") @db.Timestamp(0)
-  processedAt DateTime?                 @map("processed_at") @db.Timestamp(0)
-  metadataJson Json?                    @map("metadata_json")
-  notes       String?                   @db.Text
-  enabled     Boolean                   @default(true)
-  createdAt   DateTime                  @default(now()) @map("created_at") @db.Timestamp(0)
-  updatedAt   DateTime                  @updatedAt @map("updated_at") @db.Timestamp(0)
-  methods     BotLearningMethodSource[]
+  id           BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
+  name         String                    @db.VarChar(160)
+  sourceType   LearningSourceType        @map("source_type")
+  uri          String?                   @db.Text
+  contentHash  String?                   @unique(map: "uq_bot_learning_sources_content_hash") @map("content_hash") @db.VarChar(128)
+  language     String?                   @db.VarChar(16)
+  status       LearningSourceStatus      @default(pending)
+  trustLevel   TrustLevel                @default(low) @map("trust_level")
+  capturedAt   DateTime?                 @map("captured_at") @db.Timestamp(0)
+  processedAt  DateTime?                 @map("processed_at") @db.Timestamp(0)
+  metadataJson Json?                     @map("metadata_json")
+  notes        String?                   @db.Text
+  enabled      Boolean                   @default(true)
+  createdAt    DateTime                  @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt    DateTime                  @updatedAt @map("updated_at") @db.Timestamp(0)
+  methods      BotLearningMethodSource[]
 
   @@index([sourceType, status], map: "idx_bot_learning_sources_type_status")
   @@map("bot_learning_sources")
 }
 
 model BotLearningMethodSource {
-  methodId  BigInt           @map("method_id") @db.UnsignedBigInt
-  sourceId  BigInt           @map("source_id") @db.UnsignedBigInt
-  role      MethodSourceRole @default(primary)
-  weight    Decimal          @default(1.0000) @db.Decimal(8, 4)
-  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamp(0)
+  methodId  BigInt            @map("method_id") @db.UnsignedBigInt
+  sourceId  BigInt            @map("source_id") @db.UnsignedBigInt
+  role      MethodSourceRole  @default(primary)
+  weight    Decimal           @default(1.0000) @db.Decimal(8, 4)
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamp(0)
   method    BotLearningMethod @relation(fields: [methodId], references: [id], onDelete: Cascade, map: "fk_bot_learning_method_sources_method")
   source    BotLearningSource @relation(fields: [sourceId], references: [id], onDelete: Cascade, map: "fk_bot_learning_method_sources_source")
 
@@ -418,48 +453,48 @@ model BotLearningMethodSource {
 }
 
 model BotLearningSession {
-  id            BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
-  methodId      BigInt                 @map("method_id") @db.UnsignedBigInt
-  assignmentId  BigInt?                @map("assignment_id") @db.UnsignedBigInt
-  name          String                 @db.VarChar(160)
-  status        LearningSessionStatus  @default(recording)
-  startedAt     DateTime               @default(now()) @map("started_at") @db.Timestamp(0)
-  endedAt       DateTime?              @map("ended_at") @db.Timestamp(0)
-  summaryJson   Json?                  @map("summary_json")
-  notes         String?                @db.Text
-  method        BotLearningMethod      @relation(fields: [methodId], references: [id], onDelete: Cascade, map: "fk_bot_learning_sessions_method")
-  assignment    BotHuntAssignment?     @relation(fields: [assignmentId], references: [id], onDelete: SetNull, map: "fk_bot_learning_sessions_assignment")
-  events        BotLearningEvent[]
+  id           BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
+  methodId     BigInt                @map("method_id") @db.UnsignedBigInt
+  assignmentId BigInt?               @map("assignment_id") @db.UnsignedBigInt
+  name         String                @db.VarChar(160)
+  status       LearningSessionStatus @default(recording)
+  startedAt    DateTime              @default(now()) @map("started_at") @db.Timestamp(0)
+  endedAt      DateTime?             @map("ended_at") @db.Timestamp(0)
+  summaryJson  Json?                 @map("summary_json")
+  notes        String?               @db.Text
+  method       BotLearningMethod     @relation(fields: [methodId], references: [id], onDelete: Cascade, map: "fk_bot_learning_sessions_method")
+  assignment   BotHuntAssignment?    @relation(fields: [assignmentId], references: [id], onDelete: SetNull, map: "fk_bot_learning_sessions_assignment")
+  events       BotLearningEvent[]
 
   @@map("bot_learning_sessions")
 }
 
 model BotLearningEvent {
-  id          BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
-  sessionId   BigInt                  @map("session_id") @db.UnsignedBigInt
-  eventType   String                  @map("event_type") @db.VarChar(80)
-  occurredAt  DateTime                @default(now()) @map("occurred_at") @db.Timestamp(0)
-  stateJson   Json?                   @map("state_json")
-  actionJson  Json?                   @map("action_json")
-  reward      Decimal?                @db.Decimal(10, 4)
-  notes       String?                 @db.Text
-  session     BotLearningSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade, map: "fk_bot_learning_events_session")
-  feedback    BotDecisionFeedback[]
+  id         BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
+  sessionId  BigInt                @map("session_id") @db.UnsignedBigInt
+  eventType  String                @map("event_type") @db.VarChar(80)
+  occurredAt DateTime              @default(now()) @map("occurred_at") @db.Timestamp(0)
+  stateJson  Json?                 @map("state_json")
+  actionJson Json?                 @map("action_json")
+  reward     Decimal?              @db.Decimal(10, 4)
+  notes      String?               @db.Text
+  session    BotLearningSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade, map: "fk_bot_learning_events_session")
+  feedback   BotDecisionFeedback[]
 
   @@index([sessionId, occurredAt], map: "idx_bot_learning_events_session_time")
   @@map("bot_learning_events")
 }
 
 model BotDecisionFeedback {
-  id               BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
-  learningEventId  BigInt?                @map("learning_event_id") @db.UnsignedBigInt
-  assignmentId      BigInt?                @map("assignment_id") @db.UnsignedBigInt
-  rating           FeedbackRating         @default(unknown)
+  id                   BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
+  learningEventId      BigInt?            @map("learning_event_id") @db.UnsignedBigInt
+  assignmentId         BigInt?            @map("assignment_id") @db.UnsignedBigInt
+  rating               FeedbackRating     @default(unknown)
   correctionActionJson Json?              @map("correction_action_json")
-  notes            String?                @db.Text
-  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamp(0)
-  learningEvent    BotLearningEvent?      @relation(fields: [learningEventId], references: [id], onDelete: Cascade, map: "fk_bot_decision_feedback_event")
-  assignment       BotHuntAssignment?     @relation(fields: [assignmentId], references: [id], onDelete: Cascade, map: "fk_bot_decision_feedback_assignment")
+  notes                String?            @db.Text
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamp(0)
+  learningEvent        BotLearningEvent?  @relation(fields: [learningEventId], references: [id], onDelete: Cascade, map: "fk_bot_decision_feedback_event")
+  assignment           BotHuntAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Cascade, map: "fk_bot_decision_feedback_assignment")
 
   @@map("bot_decision_feedback")
 }

@@ -167,9 +167,16 @@ function CreatureCard({ creature }: { creature: CreatureCatalogRecord }) {
       {creature.weakness.length > 0 && <Line label="Fraco contra" value={creature.weakness.join(", ")} />}
       {creature.strong.length > 0 && <Line label="Forte contra" value={creature.strong.join(", ")} />}
       {creature.immune.length > 0 && <Line label="Imune" value={creature.immune.join(", ")} />}
-      {creature.loot.length > 0 && <Line label="Loot" value={creature.loot.slice(0, 8).join(", ") + (creature.loot.length > 8 ? "…" : "")} />}
+      {creature.location && <Line label="Locais" value={creature.location} />}
+      {creature.maxDamage > 0 && <Line label="Dano máximo estimado" value={`${creature.maxDamage.toLocaleString("pt-BR")} (${Object.entries(creature.damageByType).map(([type, value]) => `${type} ${value}`).join(" · ")})`} />}
+      {Object.keys(creature.damageModifiers).length > 0 && <Line label="Dano recebido" value={Object.entries(creature.damageModifiers).map(([type, value]) => `${type} ${value}%`).join(" · ")} />}
+      {creature.attacks.length > 0 && <Line label="Ataques" value={creature.attacks.map((attack) => `${attack.name} ${attack.minimum}-${attack.maximum} ${attack.element}`).join(" · ")} />}
+      {creature.lootDetails.length > 0
+        ? <Line label="Loot" value={creature.lootDetails.slice(0, 8).map((drop) => `${drop.itemName}${drop.amount ? ` (${drop.amount})` : ""}${drop.rarity ? ` [${drop.rarity}]` : ""}`).join(", ") + (creature.lootDetails.length > 8 ? "…" : "")} />
+        : creature.loot.length > 0 && <Line label="Loot" value={creature.loot.slice(0, 8).join(", ") + (creature.loot.length > 8 ? "…" : "")} />}
       {creature.description && <p className="mt-3 line-clamp-3 text-[12px] leading-5 text-muted">{creature.description}</p>}
       <a href={creature.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-[11px] text-link">Fonte oficial</a>
+      {creature.communitySourceUrl && <a href={creature.communitySourceUrl} target="_blank" rel="noreferrer" className="ml-3 mt-3 inline-block text-[11px] text-link">Dano/loot da comunidade</a>}
     </article>
   );
 }
@@ -206,6 +213,6 @@ function domainLabel(domain: string): string {
   return ({
     achievement: "Achievements", book: "Livros", boss: "Bosses", building: "Prédios", charm: "Charms", city: "Cidades",
     event: "Eventos", "hunting-place": "Hunts", market: "Market", mechanic: "Mecânicas", mount: "Montarias",
-    mystery: "Mistérios", npc: "NPCs", "npc-dialogue": "Diálogos de NPC", outfit: "Outfits", quest: "Quests", rune: "Runas", "soul-core": "Soul Cores"
+    mystery: "Mistérios", npc: "NPCs", "npc-dialogue": "Diálogos de NPC", outfit: "Outfits", quest: "Quests", rune: "Runas", "soul-core": "Soul Cores", wheel: "Roda do Destino"
   } as Record<string, string>)[domain] ?? domain;
 }

@@ -19,11 +19,11 @@ describe("game catalog API", () => {
 
   it("searches official creatures with combat details", async () => {
     const token = await loginAsViewer();
-    const response = await get("/api/catalog/creatures?q=dragon&limit=10", token);
+    const response = await get("/api/catalog/creatures?q=dragon&limit=100", token);
     expect(response.status).toBe(200);
     const page = await json<{ total: number; items: Array<Record<string, unknown>> }>(response);
     expect(page.total).toBeGreaterThan(0);
-    expect(page.items.some((entry) => entry.race === "dragon" && entry.hitpoints === 1000)).toBe(true);
+    expect(page.items.some((entry) => entry.race === "dragon" && entry.hitpoints === 1000 && entry.maxDamage === 430)).toBe(true);
   });
 
   it("searches items by name and category", async () => {

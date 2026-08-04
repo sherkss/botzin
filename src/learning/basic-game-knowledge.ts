@@ -13,6 +13,7 @@ export interface BasicKnowledgeSource {
 
 const playlistOneId = "PLQ5_MIYOgaManqqg9HzzpIibf1vQLErJk";
 const playlistTwoId = "PLQ5_MIYOgaMbcJ6H5d0zsB2WMWyDoQ37B";
+const tibiaHuntChannelUrl = "https://www.youtube.com/@TibiaHunt/videos";
 
 const playlistOneVideos = [
   ["CYC2su2hYhk", "Guia completo para iniciantes — primeiros passos"],
@@ -93,12 +94,30 @@ export const BASIC_GAME_KNOWLEDGE: readonly BasicKnowledgeSource[] = [
       "Escolher hunt e rota considerando vocação, nível, skills, equipamentos, suprimentos e acessos liberados.",
       "Medir experiência, lucro, gasto de suprimentos, dano recebido e risco para comparar uma hunt.",
       "Confirmar quest, task, bestiário, evento e condição de mundo antes de depender deles.",
+      "Multi-Action do cliente possui três slots: executa o primeiro disponível fora de cooldown, ignora magia não aprendida ou item zerado e exige soltar e pressionar novamente a hotkey a cada ação.",
       "Tratar preços, eventos, balanceamentos e recomendações por nível como informações mutáveis que exigem validação."
     ].join("\n")
   },
   playlistSource(playlistOneId, "Guia para iniciantes — tutorial completo", playlistOneVideos.length),
   // A segunda playlist contém 9 itens já catalogados na primeira.
   playlistSource(playlistTwoId, "Tibia Premium — guia completo para iniciantes (2026)", 9),
+  {
+    key: "youtube-channel:tibiahunt",
+    name: "TibiaHunt — catálogo Global de hunts por level e vocação",
+    uri: tibiaHuntChannelUrl,
+    status: "pending",
+    role: "primary",
+    metadata: {
+      provider: "youtube",
+      kind: "channel",
+      handle: "TibiaHunt",
+      globalOnly: true,
+      historicalAllowed: true,
+      versionAware: true,
+      range: { minimumLevel: 0, maximumLevel: null }
+    },
+    notes: "Fonte Global fornecida pelo usuário, sem teto de level. Vídeos antigos servem como referência histórica; métricas precisam de validação pós-update."
+  },
   ...videoSources(playlistOneId, playlistOneVideos),
   ...videoSources(playlistTwoId, playlistTwoVideos)
 ];

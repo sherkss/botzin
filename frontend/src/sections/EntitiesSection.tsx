@@ -20,8 +20,54 @@ export function EntitiesSection({ state, onRefresh }: Props) {
         <MachineCard onRefresh={onRefresh} />
         <HuntCard onRefresh={onRefresh} />
         <SkillCard onRefresh={onRefresh} />
+        <ClientSpellBindingCard state={state} onRefresh={onRefresh} />
       </div>
     </section>
+  );
+}
+
+function ClientSpellBindingCard({ state, onRefresh }: Props) {
+  const { handleSubmit, busy, msg } = useFormSubmit({ url: "/api/client-spell-bindings", onSuccess: onRefresh });
+  return (
+    <CollapsibleCard icon="K" iconKind="skill" title="Magias no cliente">
+      <FormBody onSubmit={handleSubmit} busy={busy} msg={msg} submitLabel="Salvar hotkey">
+        <Field label="Personagem">
+          <Select name="characterId" required>
+            <option value="">Selecionar...</option>
+            {state.characters.map(character => <option key={character.id} value={character.id}>{character.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="Magia">
+          <Select name="skillId" required>
+            <option value="">Selecionar...</option>
+            {state.skills.map(skill => <option key={skill.id} value={skill.id}>{skill.name} ({skill.manaCost ?? 0} mana)</option>)}
+          </Select>
+        </Field>
+        <Field label="Hotkey do cliente"><Input name="hotkey" required placeholder="F1 ou CTRL+F1" /></Field>
+        <Field label="Slot Multi-Action">
+          <Select name="multiActionSlot" defaultValue="1">
+            <option value="1">I — primeira ação</option>
+            <option value="2">II — se I estiver indisponível</option>
+            <option value="3">III — se I e II estiverem indisponíveis</option>
+          </Select>
+        </Field>
+        <Field label="Modo de uso">
+          <Select name="castMode">
+            <option value="hotkey">Hotkey configurada</option>
+            <option value="spell-words">Palavras da magia</option>
+          </Select>
+        </Field>
+        <Field label="Alvo">
+          <Select name="targetMode">
+            <option value="current-target">Alvo atual</option>
+            <option value="self">Próprio personagem</option>
+            <option value="crosshair">Crosshair</option>
+          </Select>
+        </Field>
+        <Field label="Verificada em"><Input name="lastVerifiedAt" type="datetime-local" /></Field>
+        <Field label="Notas"><Textarea name="notes" placeholder="Revalidar após importar hotkeys ou atualizar o cliente" /></Field>
+      </FormBody>
+    </CollapsibleCard>
   );
 }
 

@@ -1,6 +1,7 @@
 export const TIBIA_KNOWLEDGE_DOMAINS = [
   "achievement", "book", "boss", "building", "charm", "city", "event", "hunting-place",
   "market", "mechanic", "mount", "mystery", "npc", "npc-dialogue", "outfit", "quest", "rune", "soul-core"
+  , "wheel"
 ] as const;
 
 export type TibiaKnowledgeDomain = (typeof TIBIA_KNOWLEDGE_DOMAINS)[number];
@@ -68,18 +69,29 @@ export function officialRuneEntries(spells: readonly {
   readonly manaText: string;
   readonly premium: boolean;
   readonly vocations: readonly string[];
+  readonly description?: string | null;
+  readonly cooldownSeconds?: number | null;
+  readonly groupCooldownSeconds?: number | null;
+  readonly soulPoints?: number | null;
+  readonly amount?: number | null;
+  readonly runeVocations?: readonly string[];
+  readonly runeGroup?: string | null;
+  readonly runeRequiredLevel?: number | null;
+  readonly runeMagicLevel?: number | null;
 }[]): readonly TibiaKnowledgeEntry[] {
   return spells.filter((spell) => spell.type === "rune").map((spell) => ({
     key: `official:rune:${spell.id}`,
     domain: "rune",
     name: spell.name,
-    summary: `${spell.group}; ${spell.manaText} mana; nível ${spell.requiredLevel ?? "variável"}`,
+    summary: `${spell.group}; cria ${spell.amount ?? "?"} runa(s) por ${spell.manaText} mana e ${spell.soulPoints ?? "?"} soul point(s)`,
     content: [
+      spell.description ? `Efeito: ${spell.description}` : null,
       spell.words ? `Palavras: ${spell.words}.` : null,
-      `Grupo: ${spell.group}. Mana: ${spell.manaText}. Nível: ${spell.requiredLevel ?? "variável"}.`,
-      `Vocações: ${spell.vocations.join(", ")}. Premium: ${spell.premium ? "sim" : "não"}.`
+      `Criação: ${spell.manaText} mana, ${spell.soulPoints ?? "não informado"} soul point(s), ${spell.amount ?? "não informada"} unidade(s), level ${spell.requiredLevel ?? "variável"}; vocações: ${spell.vocations.join(", ")}.`,
+      `Uso: level ${spell.runeRequiredLevel ?? "não informado"}, magic level ${spell.runeMagicLevel ?? "não informado"}, grupo ${spell.runeGroup ?? "não informado"}; vocações: ${spell.runeVocations?.join(", ") || "não informadas"}.`,
+      `Cooldown: ${spell.cooldownSeconds ?? "não informado"}s; cooldown do grupo: ${spell.groupCooldownSeconds ?? "não informado"}s. Premium: ${spell.premium ? "sim" : "não"}.`
     ].filter(Boolean).join(" "),
-    metadata: { ...spell },
+    metadata: { ...spell, detailSourceUrl: "https://tibiadata.bytewizards.de/api/v1/spells", detailTrust: "community" },
     sourceUrl: "https://www.tibia.com/library/?subtopic=spells",
     sourceUpdatedAt: null,
     trust: "official",
@@ -126,6 +138,33 @@ export const OFFICIAL_MECHANIC_KNOWLEDGE: readonly TibiaKnowledgeEntry[] = [
     content: "Soul Cores são ligados à mecânica do Soulpit. Antes de usar um core, a IA deve confirmar a criatura associada, custos, disponibilidade, objetivo e risco; conteúdo de atualização pode mudar e deve ser revalidado.",
     metadata: { feature: "Soulpit", refresh: "on-game-update" },
     sourceUrl: "https://www.tibia.com/news/?id=7895&subtopic=newsarchive", sourceUpdatedAt: null,
+    trust: "official", volatile: true
+  }
+];
+
+export const CURATED_WHEEL_KNOWLEDGE: readonly TibiaKnowledgeEntry[] = [
+  {
+    key: "official:wheel:overview", domain: "wheel", name: "Roda do Destino — funcionamento",
+    summary: "Personagens promovidos premium recebem pontos para Dedication, Conviction e Revelation.",
+    content: "A Roda do Destino fica disponível para personagens promovidos com Premium a partir do level 51. Cada level concede um promotion point. A roda possui quatro domínios e 36 fatias. Dedication concede atributos, Conviction modifica magias e Revelation libera uma habilidade forte conforme os pontos investidos no domínio. Pontos podem ser alocados e removidos livremente; para aplicar ou restaurar uma configuração, faça a alteração em um templo.",
+    metadata: { minimumLevel: 51, requiresPromotion: true, requiresPremium: true, pointsPerLevel: 1, domains: 4, slices: 36, perkTypes: ["dedication", "conviction", "revelation"], applyLocation: "temple" },
+    sourceUrl: "https://www.tibia.com/news/?id=7013&subtopic=newsarchive", sourceUpdatedAt: "2022-11-18T00:00:00.000Z",
+    trust: "official", volatile: true
+  },
+  {
+    key: "community:wheel:points-and-thresholds:2026", domain: "wheel", name: "Roda do Destino — pontos extras e estágios",
+    summary: "Revelation Perks avançam nos marcos de 250, 500 e 1000 pontos no domínio.",
+    content: "Além dos pontos por level, há fontes limitadas de promotion points extras. Os estágios de Revelation são atingidos ao investir 250, 500 e 1000 pontos no mesmo domínio. A disponibilidade e os custos de fontes extras devem ser conferidos no planner atual antes de recomendar uma build.",
+    metadata: { revelationThresholds: [250, 500, 1000], extraPointSources: ["promotion scrolls", "vocation quest", "Hunting Task Shop", "upgraded mods"], validateWithPlanner: true },
+    sourceUrl: "https://tibia.fandom.com/wiki/Wheel_of_Destiny", sourceUpdatedAt: "2026-06-02T00:00:00.000Z",
+    trust: "community", volatile: true
+  },
+  {
+    key: "official:wheel:current-balance:2026-06", domain: "wheel", name: "Roda do Destino — balanceamento atual",
+    summary: "Perks e modificações por vocação foram ajustados em 2 de junho de 2026.",
+    content: "As decisões da roda são específicas por vocação e objetivo (solo, party, hunt ou boss). A IA deve usar o Wheel of Destiny Planner oficial e revalidar nomes, valores e custos depois de cada balanceamento; não deve reutilizar uma build antiga automaticamente.",
+    metadata: { effectiveDate: "2026-06-02", appliesTo: ["druid", "knight", "monk", "paladin", "sorcerer"], plannerUrl: "https://www.tibia.com/community/?subtopic=wheelofdestinyplanner", refresh: "on-game-update" },
+    sourceUrl: "https://www.tibia.com/news/?id=8833&subtopic=newsarchive", sourceUpdatedAt: "2026-06-02T00:00:00.000Z",
     trust: "official", volatile: true
   }
 ];
@@ -222,11 +261,44 @@ function communityEntry(domain: TibiaKnowledgeDomain, id: number, value: Record<
     name,
     summary: optionalString(value.summary) ?? domainSummary(domain, value),
     content: domainContent(domain, value),
-    metadata: cleanMetadata(value),
+    metadata: domain === "hunting-place" ? { ...cleanMetadata(value), huntingProfile: huntingProfile(value) } : cleanMetadata(value),
     sourceUrl: wikiUrl,
     sourceUpdatedAt: optionalString(value.lastUpdated),
     trust: "community",
     volatile: false
+  };
+}
+
+export function huntingProfile(value: Record<string, unknown>): Record<string, unknown> {
+  const structured = recordOrNull(value.structuredData);
+  const infobox = structured ? recordOrNull(structured.infobox) : null;
+  const sections = structured && Array.isArray(structured.areaCreatureSummaries) ? structured.areaCreatureSummaries : [];
+  const creatures = new Set<string>();
+  for (const sectionValue of sections) {
+    const section = recordOrNull(sectionValue);
+    if (!section || !Array.isArray(section.creatures)) continue;
+    for (const creatureValue of section.creatures) {
+      const creature = recordOrNull(creatureValue);
+      const name = creature ? optionalString(creature.name) : null;
+      if (name) creatures.add(name);
+    }
+  }
+  const bestLoot = infobox ? [1, 2, 3, 4, 5].map((index) => optionalString(infobox[`bestloot${index}`])).filter((item): item is string => Boolean(item)) : [];
+  return {
+    city: optionalString(value.city) ?? (infobox ? optionalString(infobox.city) : null),
+    location: optionalString(value.location) ?? (infobox ? optionalString(infobox.location) : null),
+    vocation: optionalString(value.vocation) ?? (infobox ? optionalString(infobox.vocation) : null),
+    recommendedLevels: {
+      knight: optionalString(value.levelKnights) ?? (infobox ? optionalString(infobox.lvlknights) : null),
+      paladin: optionalString(value.levelPaladins) ?? (infobox ? optionalString(infobox.lvlpaladins) : null),
+      mage: optionalString(value.levelMages) ?? (infobox ? optionalString(infobox.lvlmages) : null)
+    },
+    experience: optionalString(value.experience) ?? (infobox ? optionalString(infobox.exp) : null),
+    experienceStars: infobox ? optionalString(infobox.expstar) : null,
+    loot: optionalString(value.loot) ?? (infobox ? optionalString(infobox.loot) : null),
+    lootStars: infobox ? optionalString(infobox.lootstar) : null,
+    bestLoot,
+    creatures: [...creatures]
   };
 }
 

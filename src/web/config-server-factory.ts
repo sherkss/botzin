@@ -314,6 +314,12 @@ export function createConfigServer(
       return;
     }
 
+    if (method === "POST" && pathname === "/api/client-spell-bindings") {
+      requireRole(user, "operator");
+      sendJson(response, 201, await repository.createClientSpellBinding(await readJson(request)));
+      return;
+    }
+
     if (method === "POST" && pathname === "/api/assignments") {
       requireRole(user, "operator");
       sendJson(response, 201, await repository.createAssignment(await readJson(request)));

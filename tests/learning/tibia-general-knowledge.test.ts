@@ -4,10 +4,10 @@ import { cleanWikiText } from "../../src/learning/tibia-general-knowledge.js";
 
 describe("Tibia general knowledge catalog", () => {
   it("contains the generated multi-domain snapshot without duplicate keys", () => {
-    expect(TIBIA_GENERAL_KNOWLEDGE).toHaveLength(6246);
+    expect(TIBIA_GENERAL_KNOWLEDGE).toHaveLength(6249);
     expect(new Set(TIBIA_GENERAL_KNOWLEDGE.map((entry) => entry.key)).size).toBe(TIBIA_GENERAL_KNOWLEDGE.length);
     expect([...new Set(TIBIA_GENERAL_KNOWLEDGE.map((entry) => entry.domain))]).toEqual(expect.arrayContaining([
-      "achievement", "book", "boss", "city", "event", "hunting-place", "market", "mystery", "npc", "npc-dialogue", "quest", "rune", "soul-core"
+      "achievement", "book", "boss", "city", "event", "hunting-place", "market", "mystery", "npc", "npc-dialogue", "quest", "rune", "soul-core", "wheel"
     ]));
   });
 
@@ -17,6 +17,15 @@ describe("Tibia general knowledge catalog", () => {
     });
     expect(TIBIA_GENERAL_KNOWLEDGE.find((entry) => entry.name === "A Friend in Need")?.content).toContain("Threatened Dreams Quest");
     expect(TIBIA_GENERAL_KNOWLEDGE.find((entry) => entry.name === "Ab'Dendriel Elf Cave")?.content).toContain("Machete");
+    expect(TIBIA_GENERAL_KNOWLEDGE.find((entry) => entry.name === "Ab'Dendriel Elf Cave")?.metadata.huntingProfile).toMatchObject({
+      city: "Ab'Dendriel", recommendedLevels: { knight: "20", paladin: "20", mage: "25" }, creatures: ["Snake", "Elf", "Elf Scout", "Elf Arcanist"]
+    });
+  });
+
+  it("includes current Wheel of Destiny operational knowledge", () => {
+    expect(TIBIA_GENERAL_KNOWLEDGE.filter((entry) => entry.domain === "wheel")).toHaveLength(3);
+    expect(TIBIA_GENERAL_KNOWLEDGE.find((entry) => entry.key === "official:wheel:overview")).toMatchObject({ trust: "official", volatile: true, metadata: { minimumLevel: 51, domains: 4 } });
+    expect(TIBIA_GENERAL_KNOWLEDGE.find((entry) => entry.key === "community:wheel:points-and-thresholds:2026")?.metadata).toMatchObject({ revelationThresholds: [250, 500, 1000] });
   });
 
   it("includes official runes and marks changing knowledge as volatile", () => {

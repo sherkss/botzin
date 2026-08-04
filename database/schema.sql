@@ -88,6 +88,31 @@ CREATE TABLE IF NOT EXISTS bot_skills (
   UNIQUE KEY uq_bot_skills_name (name)
 );
 
+CREATE TABLE IF NOT EXISTS bot_client_spell_bindings (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  character_id BIGINT UNSIGNED NOT NULL,
+  skill_id BIGINT UNSIGNED NOT NULL,
+  hotkey VARCHAR(40) NOT NULL,
+  multi_action_slot TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  cast_mode ENUM('hotkey', 'spell-words') NOT NULL DEFAULT 'hotkey',
+  target_mode ENUM('self', 'current-target', 'crosshair') NOT NULL DEFAULT 'current-target',
+  require_game_focus BOOLEAN NOT NULL DEFAULT TRUE,
+  last_verified_at DATETIME NULL,
+  notes TEXT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_bot_client_spell_bindings_character_skill (character_id, skill_id),
+  UNIQUE KEY uq_bot_client_spell_bindings_hotkey_slot (character_id, hotkey, multi_action_slot),
+  CONSTRAINT fk_bot_client_spell_bindings_character
+    FOREIGN KEY (character_id) REFERENCES bot_characters (id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_bot_client_spell_bindings_skill
+    FOREIGN KEY (skill_id) REFERENCES bot_skills (id)
+    ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS bot_creature_catalog (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   race VARCHAR(140) NOT NULL,
@@ -109,6 +134,16 @@ CREATE TABLE IF NOT EXISTS bot_creature_catalog (
   sees_invisible BOOLEAN NOT NULL DEFAULT FALSE,
   lootable BOOLEAN NOT NULL DEFAULT FALSE,
   loot_json JSON NULL,
+  armor INT UNSIGNED NOT NULL DEFAULT 0,
+  mitigation DOUBLE NOT NULL DEFAULT 0,
+  max_damage INT UNSIGNED NOT NULL DEFAULT 0,
+  damage_by_type_json JSON NULL,
+  damage_modifiers_json JSON NULL,
+  attacks_json JSON NULL,
+  location TEXT NULL,
+  loot_details_json JSON NULL,
+  community_source_url VARCHAR(500) NULL,
+  community_source_updated_at DATETIME NULL,
   source_url VARCHAR(500) NOT NULL,
   source_generated_at DATETIME NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

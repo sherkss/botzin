@@ -1,7 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchOfficialCreatureCatalog, fetchTibiaItemCatalog } from "./tibia-game-catalog.js";
+import { enrichCreature, fetchOfficialCreatureCatalog, fetchTibiaItemCatalog, normalizeCreatureName, type TibiaCreatureCatalogEntry } from "./tibia-game-catalog.js";
+import { TIBIA_CREATURE_CATALOG as EXISTING_CREATURES } from "./tibia-creature-catalog.generated.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const generatedAt = new Date().toISOString();
@@ -10,7 +11,7 @@ const syncCreatures = requested.size === 0 || requested.has("--creatures-only");
 const syncItems = requested.size === 0 || requested.has("--items-only");
 
 if (syncCreatures) {
-  const creatures = await fetchOfficialCreatureCatalog();
+  const creatures = requested.has("--reuse-existing") ? await enrichExistingCreatures() : await fetchOfficialCreatureCatalog();
   await writeGeneratedFile(
     "tibia-creature-catalog.generated.ts",
     "TibiaCreatureCatalogEntry",
@@ -21,6 +22,30 @@ if (syncCreatures) {
     creatures
   );
   console.log(`Saved ${creatures.length} official Tibia creatures.`);
+}
+
+async function enrichExistingCreatures(): Promise<readonly TibiaCreatureCatalogEntry[]> {
+  const first = await (await fetch("https://tibiadata.bytewizards.de/api/v1/creatures?page=1&pageSize=100")).json() as { totalCount: number; items: Array<{ id: number; name: string }> };
+  const pages = await Promise.all(Array.from({ length: Math.ceil(first.totalCount / 100) - 1 }, async (_, index) =>
+    await (await fetch(`https://tibiadata.bytewizards.de/api/v1/creatures?page=${index + 2}&pageSize=100`)).json() as { items: Array<{ id: number; name: string }> }));
+  const ids = new Map([first, ...pages].flatMap((page) => page.items).map((entry) => [normalizeCreatureName(entry.name), entry.id]));
+  const result: TibiaCreatureCatalogEntry[] = new Array(EXISTING_CREATURES.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: 12 }, async () => {
+    while (cursor < EXISTING_CREATURES.length) {
+      const index = cursor++;
+      const creature = EXISTING_CREATURES[index]! as unknown as TibiaCreatureCatalogEntry;
+      try {
+        const id = ids.get(normalizeCreatureName(creature.race)) ?? ids.get(normalizeCreatureName(creature.name));
+        const response = await fetch(`https://tibiadata.bytewizards.de/api/v1/creatures/${encodeURIComponent(id ?? creature.race)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        result[index] = enrichCreature(creature, await response.json(), creature.race);
+      } catch {
+        result[index] = { ...creature, armor: 0, mitigation: 0, maxDamage: 0, damageByType: {}, damageModifiers: {}, attacks: [], location: "", lootDetails: [], communitySourceUrl: null, communitySourceUpdatedAt: null };
+      }
+    }
+  }));
+  return result;
 }
 
 if (syncItems) {

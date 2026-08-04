@@ -32,7 +32,7 @@ describe("general Tibia knowledge API", () => {
     const response = await get("/api/catalog/knowledge/coverage", token);
     expect(response.status).toBe(200);
     const coverage = await json<{ total: number; official: number; domains: Array<{ domain: string; count: number }> }>(response);
-    expect(coverage.total).toBe(6246);
+    expect(coverage.total).toBe(6249);
     expect(coverage.official).toBeGreaterThan(30);
     expect(coverage.domains.find((entry) => entry.domain === "quest")?.count).toBe(369);
     expect(coverage.domains.find((entry) => entry.domain === "boss")?.count).toBe(316);
