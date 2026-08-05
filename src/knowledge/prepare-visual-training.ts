@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, unlink } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, unlink } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,8 @@ import {
   type VisualTrainingFrame,
   type VisualTrainingVideo
 } from "./visual-training-dataset.js";
+import { analyzeVisualTrainingVideo, ensureLocalVisualModel, visualArtifactPath, type LocalVisualAnalyzerOptions } from "./local-visual-hunt-analyzer.js";
+import { loadExistingVideoSources } from "./visual-training-sources.js";
 
 interface SourceEntry {
   readonly id?: string;
@@ -30,15 +32,24 @@ interface VideoInfo extends SourceEntry {
 interface Options {
   readonly sourceUrl: string | null;
   readonly outputRoot: string;
+  readonly knowledgeRoot: string;
   readonly limit: number;
   readonly frameIntervalSeconds: number;
   readonly maxHeight: number;
   readonly retryFailed: boolean;
   readonly keepVideo: boolean;
+  readonly analyzeLocal: boolean;
+  readonly keepFrames: boolean;
+  readonly visualModel: string;
+  readonly ollamaUrl: string;
+  readonly visualBatchSize: number;
+  readonly visualConcurrency: number;
+  readonly force: boolean;
   readonly pythonCommand: string;
 }
 
 const defaultOutputRoot = resolve(fileURLToPath(new URL("../../storage/knowledge/visual-training", import.meta.url)));
+const defaultKnowledgeRoot = resolve(fileURLToPath(new URL("../../storage/knowledge", import.meta.url)));
 const videoExtensions = new Set([".mp4", ".mkv", ".webm", ".mov"]);
 const ytDlpCommon = [
   "--js-runtimes", "node",
@@ -54,24 +65,63 @@ async function main(): Promise<void> {
   await ensureCommand("ffmpeg", ["-version"], "FFmpeg não está disponível no PATH.");
 
   const dataset = await VisualTrainingDataset.open(options.outputRoot);
-  const entries: readonly SourceEntry[] = options.retryFailed
+  const analyzerOptions: LocalVisualAnalyzerOptions = {
+    visualTrainingRoot: options.outputRoot,
+    knowledgeRoot: options.knowledgeRoot,
+    ollamaUrl: options.ollamaUrl,
+    model: options.visualModel,
+    batchSize: options.visualBatchSize,
+    concurrency: options.visualConcurrency,
+    retries: 3
+  };
+  if (options.analyzeLocal) await ensureLocalVisualModel(analyzerOptions);
+  const completedVideoIds = new Set(dataset.listVideos()
+    .filter((video) => video.analysisStatus === "complete")
+    .map((video) => video.videoId));
+  const discoveredEntries: readonly SourceEntry[] = options.retryFailed
     ? dataset.listFailures().map((failure) => ({ id: failure.videoId, title: failure.title, webpage_url: failure.sourceUrl }))
-    : await discoverEntries(requiredSource(options.sourceUrl), options);
+    : options.sourceUrl
+      ? await discoverEntries(
+        options.sourceUrl,
+        options,
+        options.analyzeLocal && !options.force ? options.limit + completedVideoIds.size : options.limit
+      )
+      : await loadExistingVideoSources(join(options.knowledgeRoot, "raw"));
+  const entries = options.analyzeLocal && !options.force && !options.retryFailed
+    ? discoveredEntries.filter((entry) => !entry.id || !completedVideoIds.has(entry.id)).slice(0, options.limit)
+    : discoveredEntries.slice(0, options.limit);
 
   if (entries.length === 0) {
-    console.log(options.retryFailed ? "[visual] A fila de falhas está vazia." : "[visual] Nenhum vídeo encontrado.");
+    console.log(options.retryFailed ? "[visual] A fila de falhas está vazia." : "[visual] Nenhum vídeo novo para processar.");
     return;
+  }
+
+  if (!options.sourceUrl && !options.retryFailed) {
+    console.log(`[visual] Usando fila automática dos metadados existentes em ${join(options.knowledgeRoot, "raw")}.`);
   }
 
   console.log(`[visual] Preparando ${entries.length} vídeo(s), com um quadro a cada ${options.frameIntervalSeconds}s.`);
   for (const [position, entry] of entries.entries()) {
     if (!entry.id) continue;
+    if (options.analyzeLocal && !options.force && completedVideoIds.has(entry.id)) {
+      console.log(`[visual] Ignorado: ${entry.id} já possui análise visual completa. Use --force para refazer.`);
+      continue;
+    }
     const sourceUrl = entry.webpage_url ?? entry.original_url ?? entry.url ?? `https://www.youtube.com/watch?v=${entry.id}`;
     const title = entry.title ?? entry.id;
     console.log(`[visual] ${position + 1}/${entries.length}: ${title} (${entry.id})`);
     try {
       let prepared = await prepareVideo({ videoId: entry.id, title, sourceUrl }, options);
       await dataset.complete(prepared);
+      if (options.analyzeLocal) {
+        prepared = (await analyzeVisualTrainingVideo(prepared, analyzerOptions)).video;
+        await dataset.complete(prepared);
+        if (!options.keepFrames) {
+          await rm(visualArtifactPath(options.outputRoot, prepared.framesDirectory), { recursive: true, force: true });
+          prepared = { ...prepared, framesDeletedAfterAnalysis: true };
+          await dataset.complete(prepared);
+        }
+      }
       if (!options.keepVideo && prepared.videoPath) {
         await unlink(join(options.outputRoot, prepared.videoPath));
         prepared = { ...prepared, videoPath: null, sourceVideoDeleted: true };
@@ -90,13 +140,13 @@ async function main(): Promise<void> {
   console.log(`[visual] Preparados: ${dataset.listVideos().length}; falhas pendentes: ${dataset.listFailures().length}.`);
 }
 
-async function discoverEntries(sourceUrl: string, options: Options): Promise<readonly SourceEntry[]> {
+async function discoverEntries(sourceUrl: string, options: Options, discoveryLimit: number): Promise<readonly SourceEntry[]> {
   const output = await runCapture(options.pythonCommand, [
-    "-m", "yt_dlp", ...ytDlpCommon, "--flat-playlist", "--dump-single-json", "--playlist-end", String(options.limit), sourceUrl
+    "-m", "yt_dlp", ...ytDlpCommon, "--flat-playlist", "--dump-single-json", "--playlist-end", String(discoveryLimit), sourceUrl
   ]);
   const manifest = JSON.parse(output) as SourceManifest;
   const entries = manifest.entries ?? [manifest];
-  return entries.filter((entry): entry is SourceEntry & { id: string } => Boolean(entry.id)).slice(0, options.limit);
+  return entries.filter((entry): entry is SourceEntry & { id: string } => Boolean(entry.id)).slice(0, discoveryLimit);
 }
 
 async function prepareVideo(
@@ -148,7 +198,12 @@ async function prepareVideo(
     sourceVideoDeleted: false,
     framesDirectory: relative(options.outputRoot, framesDirectory).replaceAll("\\", "/"),
     frames,
-    preparedAt: new Date().toISOString()
+    preparedAt: new Date().toISOString(),
+    analysisStatus: "pending",
+    analysisPath: null,
+    analyzedFrames: 0,
+    analyzedAt: null,
+    framesDeletedAfterAnalysis: false
   };
 }
 
@@ -160,11 +215,19 @@ function parseOptions(args: readonly string[]): Options {
   return {
     sourceUrl: valueAfter("--url") ?? valueAfter("--playlist") ?? null,
     outputRoot: resolve(valueAfter("--output") ?? process.env.BOTZIN_VISUAL_TRAINING_DIR ?? defaultOutputRoot),
+    knowledgeRoot: resolve(valueAfter("--knowledge-output") ?? process.env.BOTZIN_KNOWLEDGE_DIR ?? defaultKnowledgeRoot),
     limit: positiveInteger(valueAfter("--limit"), 1, "--limit"),
     frameIntervalSeconds: positiveNumber(valueAfter("--frame-interval"), 2, "--frame-interval"),
     maxHeight: positiveInteger(valueAfter("--max-height"), 720, "--max-height"),
     retryFailed: args.includes("--retry-failed"),
     keepVideo: args.includes("--keep-video"),
+    analyzeLocal: args.includes("--analyze-local"),
+    keepFrames: args.includes("--keep-frames"),
+    visualModel: valueAfter("--model") ?? process.env.BOTZIN_VISUAL_MODEL ?? "gemma3:4b",
+    ollamaUrl: process.env.BOTZIN_OLLAMA_URL ?? "http://127.0.0.1:11434",
+    visualBatchSize: positiveInteger(valueAfter("--batch-size") ?? process.env.BOTZIN_VISUAL_BATCH_SIZE, 4, "--batch-size"),
+    visualConcurrency: positiveInteger(valueAfter("--concurrency") ?? process.env.BOTZIN_VISUAL_CONCURRENCY, 1, "--concurrency"),
+    force: args.includes("--force"),
     pythonCommand: process.env.BOTZIN_PYTHON_COMMAND ?? "python"
   };
 }
@@ -179,11 +242,6 @@ function positiveNumber(value: string | undefined, fallback: number, name: strin
   const parsed = value === undefined ? fallback : Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${name} precisa ser um número maior que zero.`);
   return parsed;
-}
-
-function requiredSource(value: string | null): string {
-  if (!value) throw new Error("Informe um vídeo ou playlist com --url. Para retentar falhas, use --retry-failed.");
-  return value;
 }
 
 function publishedAt(value: string | undefined): string | null {

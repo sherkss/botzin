@@ -20,6 +20,11 @@ export interface VisualTrainingVideo {
   readonly framesDirectory: string;
   readonly frames: readonly VisualTrainingFrame[];
   readonly preparedAt: string;
+  readonly analysisStatus?: "pending" | "complete";
+  readonly analysisPath?: string | null;
+  readonly analyzedFrames?: number;
+  readonly analyzedAt?: string | null;
+  readonly framesDeletedAfterAnalysis?: boolean;
 }
 
 export interface VisualTrainingFailure {

@@ -384,7 +384,56 @@ Falhas ficam em `storage/knowledge/visual-training/failed-videos.json` e podem s
 npm run knowledge:video:retry
 ```
 
-Essa etapa prepara o dataset visual; ela ainda não classifica as ações vistas nem treina um modelo automaticamente. Baixe somente conteúdo que você tem permissão para utilizar.
+O comando `knowledge:video:prepare` sozinho prepara o dataset visual, sem classificar as ações. Baixe somente conteúdo que você tem permissão para utilizar.
+
+#### Análise visual local de todos os quadros extraídos
+
+O modo local usa o Ollama em `127.0.0.1` e não envia imagens para serviços externos. Instale o Ollama, inicie-o e baixe um modelo multimodal compatível com o notebook:
+
+```powershell
+ollama pull gemma3:4b
+```
+
+Para baixar, analisar cada quadro extraído, indexar o relatório e só então apagar vídeo e quadros:
+
+```powershell
+npm run knowledge:video:train -- --url "URL_DO_VIDEO_OU_PLAYLIST" --limit 1 --frame-interval 2
+```
+
+Sem `--url`, o mesmo comando usa automaticamente os arquivos `.info.json` já existentes em `storage/knowledge/raw/` como fila e processa somente o próximo vídeo ainda não concluído:
+
+```powershell
+npm run knowledge:video:train -- --limit 1 --frame-interval 5
+```
+
+Para analisar frames que já foram preparados:
+
+```powershell
+npm run knowledge:video:analyze
+```
+
+Cada lote tem checkpoint individual em `visual-training/analysis/VIDEO_ID/frames/`, permitindo retomar após interrupção. O relatório final fica em `hunt-report.json` e também é incluído em `knowledge-index.json`. O padrão neste notebook é lote de 4 imagens e concorrência 1; ajuste com `--batch-size` e `--concurrency` somente após medir memória e temperatura. Use `--keep-frames` ou `--keep-video` para impedir as respectivas remoções.
+
+Vídeos com `analysisStatus: complete` são ignorados nas execuções seguintes e não são baixados novamente. Use `--force` somente quando quiser refazer deliberadamente uma análise concluída.
+
+### Migração da IA para outra máquina
+
+Gere um pacote portátil com o conhecimento processado, índices, modelos e um modelo de configuração sem segredos:
+
+```powershell
+npm run ai:export
+```
+
+O destino é mostrado no terminal e, por padrão, fica em `storage/migrations/`. Vídeos, áudios, quadros e downloads brutos não entram no pacote. Para incluí-los deliberadamente, use `--include-transient`. Um dump MySQL criado separadamente pode ser anexado com `--database-dump CAMINHO.sql`.
+
+Na máquina nova, faça checkout do mesmo commit, instale as dependências e valide o pacote antes de importar:
+
+```powershell
+npm run ai:import -- --input "D:\botzin-ai-AAAA-MM-DD" --dry-run
+npm run ai:import -- --input "D:\botzin-ai-AAAA-MM-DD"
+```
+
+A importação confere tamanho e SHA-256 de cada arquivo. Arquivos existentes são copiados para `storage/migration-backups/` antes da substituição. O `.env` e seus segredos nunca são exportados; a referência fica em `storage/migration-import/configuration.env.example`. Dumps são colocados em `storage/migration-import/database.sql` para restauração manual e não são aplicados automaticamente.
 
 Os artefatos são gravados em `storage/knowledge/`:
 
