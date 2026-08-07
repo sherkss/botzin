@@ -11,6 +11,7 @@ import { ValidationError } from "../core/errors.js";
 import { JwtService } from "../auth/jwt-service.js";
 import { hasRole } from "../auth/role-policy.js";
 import type { RuntimeConfig } from "../config/runtime-config.js";
+import { applyMachineRuntimeConfig } from "../config/machine-runtime-config.js";
 import { ConfigUserRepository } from "../database/config-user-repository.js";
 import { ConfigurationRepository } from "../database/configuration-repository.js";
 import { GameCatalogRepository } from "../database/game-catalog-repository.js";
@@ -20,6 +21,8 @@ import { ObsPreviewFrameSource } from "../perception/obs-preview-frame-source.js
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { LiveDecisionStore } from "../decision/live-decision-store.js";
 import { parseSessionAnalyser } from "../telemetry/session-analyser-parser.js";
+import { importCreatureAnimation } from "../knowledge/creature-animation-importer.js";
+import { CreatureAnimationBatchJob } from "../knowledge/creature-animation-batch.js";
 
 const MAX_JSON_BYTES = 1024 * 1024;
 const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
@@ -141,14 +144,17 @@ export function createConfigServer(
   knowledgeDir = join(storageDir, "knowledge"),
   decisionLogPath = join(storageDir, "live-decisions.jsonl")
 ): Server {
-  const repository = new ConfigurationRepository(pool);
+  const repository = new ConfigurationRepository(pool, config.jwtSecret);
   const gameCatalogRepository = new GameCatalogRepository(pool);
   const tibiaLiveStatus = new TibiaLiveStatusService();
   const userRepository = new ConfigUserRepository(pool);
   const jwtService = new JwtService(config);
-  const obsPreview = new ObsPreviewFrameSource(config);
   const knowledgeStore = new KnowledgeStore(knowledgeDir);
   const liveDecisionStore = new LiveDecisionStore(decisionLogPath);
+  let obsPreview: ObsPreviewFrameSource | null = null;
+  let obsPreviewFingerprint = "";
+  const creatureAnimationRoot = join(knowledgeDir, "creature-assets");
+  const creatureAnimationBatch = new CreatureAnimationBatchJob(creatureAnimationRoot);
   const loginFailures = new Map<string, { count: number; resetAt: number }>();
   const dummyPasswordHash = bcrypt.hash(randomUUID(), 12);
 
@@ -186,6 +192,55 @@ export function createConfigServer(
       requireRole(user, "viewer");
       const options = catalogSearchOptions(requestUrl);
       sendJson(response, 200, await gameCatalogRepository.searchItems(options.query, options.limit, options.offset));
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/creature-assets/import") {
+      requireRole(user, "operator");
+      const payload = await readJson(request);
+      const race = typeof payload.race === "string" ? payload.race.trim().toLowerCase() : "";
+      const fileTitle = typeof payload.fileTitle === "string" ? payload.fileTitle.trim() : undefined;
+      if (!race) throw new ValidationError("race is required.");
+      const creature = await gameCatalogRepository.findCreatureByRace(race);
+      if (!creature) throw httpError(404, `Creature race "${race}" was not found in the catalog.`);
+      const result = await importCreatureAnimation({
+        root: creatureAnimationRoot,
+        identity: {
+          catalogId: creature.id,
+          race: creature.race,
+          name: creature.name,
+          officialImageUrl: creature.imageUrl
+        },
+        fileTitle
+      });
+      sendJson(response, result.cached ? 200 : 201, result);
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/creature-assets/import-all") {
+      requireRole(user, "operator");
+      const payload = await readJson(request);
+      const delayMs = payload.delayMs === undefined ? 750 : Number(payload.delayMs);
+      const limit = payload.limit === undefined ? null : Number(payload.limit);
+      if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > 1_000)) {
+        throw new ValidationError("limit must be an integer between 1 and 1000.");
+      }
+      const catalog = await gameCatalogRepository.listCreatureAnimationSources();
+      const selected = limit === null ? catalog : catalog.slice(0, limit);
+      const status = await creatureAnimationBatch.start(selected.map((creature) => ({
+        catalogId: creature.id,
+        race: creature.race,
+        name: creature.name,
+        officialImageUrl: creature.imageUrl
+      })), delayMs);
+      sendJson(response, 202, status);
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/creature-assets/import-all/status") {
+      requireRole(user, "viewer");
+      const status = await creatureAnimationBatch.getStatus();
+      sendJson(response, status ? 200 : 404, status ?? { error: "No creature animation import job was found." });
       return;
     }
 
@@ -280,7 +335,17 @@ export function createConfigServer(
     if (method === "GET" && pathname === "/api/obs/preview") {
       requireRole(user, "viewer");
       try {
-        const frame = await obsPreview.captureFrame();
+        const storedMachine = await repository.getMachineRuntimeConfig(config.nodeId);
+        const previewConfig = storedMachine
+          ? applyMachineRuntimeConfig(config, storedMachine.machine, storedMachine.runtime)
+          : config;
+        const fingerprint = `${previewConfig.obsWebSocketUrl}\n${previewConfig.obsSourceName}\n${previewConfig.obsWebSocketPassword}`;
+        if (!obsPreview || fingerprint !== obsPreviewFingerprint) {
+          await obsPreview?.disconnect();
+          obsPreview = new ObsPreviewFrameSource(previewConfig);
+          obsPreviewFingerprint = fingerprint;
+        }
+        const frame = await obsPreview.capturePreviewFrame();
         response.writeHead(200, {
           "Content-Type": frame.mimeType,
           "Cache-Control": "no-store, no-cache",
@@ -327,6 +392,13 @@ export function createConfigServer(
     if (method === "POST" && pathname === "/api/client-spell-bindings") {
       requireRole(user, "operator");
       sendJson(response, 201, await repository.createClientSpellBinding(await readJson(request)));
+      return;
+    }
+
+    const machineUpdateMatch = pathname.match(/^\/api\/machines\/(\d+)$/);
+    if (method === "POST" && machineUpdateMatch) {
+      requireRole(user, "operator");
+      sendJson(response, 200, await repository.updateMachine(Number(machineUpdateMatch[1]), await readJson(request)));
       return;
     }
 
@@ -639,7 +711,7 @@ export function createConfigServer(
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       "Referrer-Policy": "no-referrer",
-      "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; connect-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+      "Content-Security-Policy": "default-src 'self'; img-src 'self' data: blob:; connect-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'"
     });
     createReadStream(filePath).pipe(response);
   }

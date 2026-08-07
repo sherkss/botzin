@@ -72,7 +72,8 @@ async function main(): Promise<void> {
     model: options.visualModel,
     batchSize: options.visualBatchSize,
     concurrency: options.visualConcurrency,
-    retries: 3
+    retries: 2,
+    requestTimeoutMs: positiveInteger(process.env.BOTZIN_OLLAMA_REQUEST_TIMEOUT_MS, 1_200_000, "BOTZIN_OLLAMA_REQUEST_TIMEOUT_MS")
   };
   if (options.analyzeLocal) await ensureLocalVisualModel(analyzerOptions);
   const completedVideoIds = new Set(dataset.listVideos()
@@ -225,7 +226,7 @@ function parseOptions(args: readonly string[]): Options {
     keepFrames: args.includes("--keep-frames"),
     visualModel: valueAfter("--model") ?? process.env.BOTZIN_VISUAL_MODEL ?? "gemma3:4b",
     ollamaUrl: process.env.BOTZIN_OLLAMA_URL ?? "http://127.0.0.1:11434",
-    visualBatchSize: positiveInteger(valueAfter("--batch-size") ?? process.env.BOTZIN_VISUAL_BATCH_SIZE, 4, "--batch-size"),
+    visualBatchSize: positiveInteger(valueAfter("--batch-size") ?? process.env.BOTZIN_VISUAL_BATCH_SIZE, 1, "--batch-size"),
     visualConcurrency: positiveInteger(valueAfter("--concurrency") ?? process.env.BOTZIN_VISUAL_CONCURRENCY, 1, "--concurrency"),
     force: args.includes("--force"),
     pythonCommand: process.env.BOTZIN_PYTHON_COMMAND ?? "python"

@@ -10,6 +10,8 @@ services:
       MYSQL_DATABASE: botzin
       MYSQL_USER: botzin
       MYSQL_PASSWORD: ${BOTZIN_MYSQL_PASSWORD:?configure BOTZIN_MYSQL_PASSWORD}
+    ports:
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./docker/01-databases.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
@@ -51,6 +53,8 @@ services:
       BOTZIN_WEB_PORT: "4580"
       BOTZIN_KNOWLEDGE_DIR: /app/host-storage/knowledge
       BOTZIN_DECISION_LOG_PATH: /app/host-storage/live-decisions.jsonl
+      # Identidade usada para localizar a configuração operacional no banco.
+      BOTZIN_NODE_ID: ${BOTZIN_NODE_ID:-pc-main}
 
       # ── Segredos — troque antes de colocar em produção ──
       BOTZIN_JWT_SECRET: ${BOTZIN_JWT_SECRET:?configure BOTZIN_JWT_SECRET}
@@ -64,7 +68,7 @@ services:
       - "127.0.0.1:4580:4580"
     volumes:
       - storage_data:/app/storage
-      - ./storage:/app/host-storage:ro
+      - ./storage:/app/host-storage
 
 volumes:
   mysql_data:

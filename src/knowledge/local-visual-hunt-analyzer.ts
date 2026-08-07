@@ -1,4 +1,6 @@
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { KnowledgeStore, type KnowledgeDocument, type TranscriptSegment } from "./knowledge-store.js";
 import type { VisualTrainingFrame, VisualTrainingVideo } from "./visual-training-dataset.js";
@@ -44,11 +46,13 @@ export interface LocalVisualAnalyzerOptions {
   readonly batchSize: number;
   readonly concurrency: number;
   readonly retries: number;
+  readonly requestTimeoutMs?: number;
   readonly fetcher?: typeof fetch;
 }
 
 interface OllamaChatResponse {
   readonly message?: { readonly content?: string };
+  readonly done_reason?: string;
 }
 
 const observationSchema = {
@@ -145,28 +149,71 @@ async function analyzeBatch(video: VisualTrainingVideo, frames: readonly VisualT
   const body = {
     model: options.model,
     stream: false,
+    keep_alive: "10m",
     format: observationSchema,
-    options: { temperature: 0 },
+    options: { temperature: 0, num_predict: 1_024 },
     messages: [{ role: "user", content: prompt, images }]
   };
-  let lastError: unknown;
+  const errors: string[] = [];
   for (let attempt = 1; attempt <= options.retries; attempt += 1) {
     try {
-      const response = await (options.fetcher ?? fetch)(`${normalizedUrl(options.ollamaUrl)}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-      if (!response.ok) throw new Error(`Ollama HTTP ${response.status}: ${await response.text()}`);
-      const payload = await response.json() as OllamaChatResponse;
+      const payload = options.fetcher
+        ? await fetchOllamaChat(`${normalizedUrl(options.ollamaUrl)}/api/chat`, body, options.fetcher)
+        : await requestOllamaChat(`${normalizedUrl(options.ollamaUrl)}/api/chat`, body, options.requestTimeoutMs ?? 1_200_000);
+      if (payload.done_reason === "length") throw new Error("Ollama atingiu o limite de resposta antes de concluir o JSON.");
       const parsed = JSON.parse(payload.message?.content ?? "") as { observations?: unknown[] };
       return normalizeObservations(parsed.observations, frames);
     } catch (error) {
-      lastError = error;
+      errors.push(errorMessageWithCause(error));
       if (attempt < options.retries) await new Promise((resolvePromise) => setTimeout(resolvePromise, attempt * 1_000));
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  throw new Error(`Falha do Ollama após ${options.retries} tentativa(s): ${errors.join(" | ")}`);
+}
+
+async function fetchOllamaChat(url: string, body: unknown, fetcher: typeof fetch): Promise<OllamaChatResponse> {
+  const response = await fetcher(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error(`Ollama HTTP ${response.status}: ${await response.text()}`);
+  return response.json() as Promise<OllamaChatResponse>;
+}
+
+async function requestOllamaChat(urlValue: string, body: unknown, timeoutMs: number): Promise<OllamaChatResponse> {
+  const url = new URL(urlValue);
+  const encodedBody = JSON.stringify(body);
+  const requestFunction = url.protocol === "https:" ? httpsRequest : httpRequest;
+  return new Promise<OllamaChatResponse>((resolvePromise, reject) => {
+    const request = requestFunction(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(encodedBody)
+      }
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      response.on("error", reject);
+      response.on("end", () => {
+        const responseBody = Buffer.concat(chunks).toString("utf8");
+        const statusCode = response.statusCode ?? 0;
+        if (statusCode < 200 || statusCode >= 300) {
+          reject(new Error(`Ollama HTTP ${statusCode}: ${responseBody.slice(0, 2_000)}`));
+          return;
+        }
+        try {
+          resolvePromise(JSON.parse(responseBody) as OllamaChatResponse);
+        } catch (error) {
+          reject(new Error(`Resposta HTTP inválida do Ollama: ${errorMessageWithCause(error)}`));
+        }
+      });
+    });
+    request.setTimeout(timeoutMs, () => request.destroy(new Error(`Ollama excedeu o timeout local de ${timeoutMs}ms.`)));
+    request.on("error", reject);
+    request.end(encodedBody);
+  });
 }
 
 function normalizeObservations(values: unknown, frames: readonly VisualTrainingFrame[]): VisualFrameObservation[] {
@@ -281,6 +328,12 @@ function numberOrNull(value: unknown): number | null {
 
 function normalizedUrl(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function errorMessageWithCause(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const cause = error.cause instanceof Error ? ` — ${error.cause.message}` : error.cause ? ` — ${String(error.cause)}` : "";
+  return `${error.message}${cause}`;
 }
 
 export function visualArtifactPath(root: string, path: string): string {

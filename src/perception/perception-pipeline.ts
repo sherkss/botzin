@@ -13,13 +13,19 @@ export interface PerceptionResult {
 }
 
 export class PerceptionPipeline {
+  private nextFrame: Promise<ScreenFrame> | null = null;
+
   constructor(
     private readonly frameSource: FrameSource,
     private readonly detector: EntityDetector
   ) {}
 
   async inspectCurrentFrame(): Promise<PerceptionResult> {
-    const frame = await this.frameSource.captureFrame();
+    this.nextFrame ??= this.captureNextFrame();
+    const frame = await this.nextFrame;
+    // Capture the next frame while the detector processes this one. Only one
+    // frame is prefetched, so stale frames never accumulate in a queue.
+    this.nextFrame = this.captureNextFrame();
     const entities = await this.detector.detect(frame);
 
     return {
@@ -28,5 +34,13 @@ export class PerceptionPipeline {
       entities,
       frame
     };
+  }
+
+  private captureNextFrame(): Promise<ScreenFrame> {
+    const pending = this.frameSource.captureFrame();
+    // A slow detector may finish after a prefetched capture fails. Attach a
+    // handler immediately; the original rejection is still observed next cycle.
+    void pending.catch(() => undefined);
+    return pending;
   }
 }

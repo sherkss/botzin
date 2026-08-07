@@ -22,12 +22,29 @@ export class ObsPreviewFrameSource implements FrameSource {
   }
 
   async captureFrame(): Promise<ScreenFrame> {
+    // The detector consumes a 320x320 letterboxed tensor. Asking OBS for a
+    // full-resolution PNG wastes network, decode and resize time on every cycle.
+    return this.captureScreenshot("jpg", 70, this.config.onnxInputWidth);
+  }
+
+  async capturePreviewFrame(): Promise<ScreenFrame> {
+    return this.captureScreenshot("jpg", 70, 1280);
+  }
+
+  async disconnect(): Promise<void> {
+    if (!this.connected) return;
+    await this.obs.disconnect();
+    this.connected = false;
+  }
+
+  private async captureScreenshot(imageFormat: "png" | "jpg", imageCompressionQuality: number, imageWidth?: number): Promise<ScreenFrame> {
     await this.connect();
 
     const screenshot = await this.obs.call("GetSourceScreenshot", {
       sourceName: this.config.obsSourceName,
-      imageFormat: "png",
-      imageCompressionQuality: -1
+      imageFormat,
+      imageCompressionQuality,
+      ...(imageWidth ? { imageWidth } : {})
     });
     const data = parseImageData(String(screenshot.imageData));
     const metadata = await sharp(data).metadata();
@@ -40,7 +57,7 @@ export class ObsPreviewFrameSource implements FrameSource {
       width: metadata.width ?? 0,
       height: metadata.height ?? 0,
       data,
-      mimeType: "image/png"
+      mimeType: imageFormat === "jpg" ? "image/jpeg" : "image/png"
     };
   }
 

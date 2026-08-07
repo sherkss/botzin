@@ -412,9 +412,57 @@ Para analisar frames que já foram preparados:
 npm run knowledge:video:analyze
 ```
 
-Cada lote tem checkpoint individual em `visual-training/analysis/VIDEO_ID/frames/`, permitindo retomar após interrupção. O relatório final fica em `hunt-report.json` e também é incluído em `knowledge-index.json`. O padrão neste notebook é lote de 4 imagens e concorrência 1; ajuste com `--batch-size` e `--concurrency` somente após medir memória e temperatura. Use `--keep-frames` ou `--keep-video` para impedir as respectivas remoções.
+Cada lote tem checkpoint individual em `visual-training/analysis/VIDEO_ID/frames/`, permitindo retomar após interrupção. O relatório final fica em `hunt-report.json` e também é incluído em `knowledge-index.json`. O padrão seguro neste notebook é lote de 1 imagem, até duas tentativas, concorrência 1 e timeout local de 20 minutos por chamada; ajuste `--batch-size`, `--retries`, `--concurrency` e `--timeout-ms` somente quando necessário. Use `--keep-frames` ou `--keep-video` para impedir as respectivas remoções.
 
 Vídeos com `analysisStatus: complete` são ignorados nas execuções seguintes e não são baixados novamente. Use `--force` somente quando quiser refazer deliberadamente uma análise concluída.
+
+#### Importar animações de criaturas para o dataset
+
+A API pode localizar o GIF animado de uma criatura no TibiaWiki/Fandom, validar a criatura pelo campo `race` do catálogo, separar os quadros em PNG e registrar fonte, hash e identificação:
+
+```http
+POST /api/creature-assets/import
+Authorization: Bearer TOKEN_DE_OPERATOR
+Content-Type: application/json
+
+{"race":"dragon"}
+```
+
+Quando o nome do arquivo no fansite não coincidir com o catálogo, informe-o explicitamente:
+
+```json
+{"race":"dragon","fileTitle":"Dragon.gif"}
+```
+
+Os arquivos ficam em `storage/knowledge/creature-assets/RACE/`, fora do Git. A importação é idempotente: chamadas posteriores retornam o manifesto existente sem baixar novamente. Somente GIFs animados do domínio de imagens do fansite são aceitos; imagens estáticas, respostas grandes ou conteúdo com assinatura inválida são recusados. Esses recursos são destinados ao treinamento visual local e não são incluídos automaticamente em exportações ou redistribuídos.
+
+Para iniciar a importação de todas as criaturas do catálogo em segundo plano:
+
+```http
+POST /api/creature-assets/import-all
+Authorization: Bearer TOKEN_DE_OPERATOR
+Content-Type: application/json
+
+{"delayMs":750}
+```
+
+Consulte o progresso sem interromper o trabalho:
+
+```http
+GET /api/creature-assets/import-all/status
+Authorization: Bearer TOKEN
+```
+
+O checkpoint `batch-status.json` informa total, concluídas, importadas, encontradas no cache e falhas. Uma nova execução retoma na prática pelo cache e tenta novamente somente o que não foi importado. Para uma validação pequena antes do catálogo completo, envie `{"limit":10,"delayMs":750}`.
+
+Depois de concluir a importação, instale o ambiente de treino e gere um detector YOLO/ONNX inicial:
+
+```powershell
+python -m pip install -r requirements-training.txt
+npm run creatures:train -- --epochs 5 --samples-per-class 3 --image-size 320
+```
+
+O gerador combina os sprites animados com os frames reais disponíveis em `storage/knowledge/visual-training/frames`, desfocando o fundo para que criaturas já presentes e não anotadas não sejam tratadas como exemplos negativos. O resultado é salvo em `models/tibia-creatures.onnx`, com as classes em `models/tibia-creatures.labels.json`. Esse primeiro modelo usa dados sintéticos: valide-o e refine-o com mais recortes reais antes de habilitar decisões automáticas.
 
 ### Migração da IA para outra máquina
 
@@ -517,28 +565,11 @@ O projeto possui dois modos:
 - `mock`: modo seguro para desenvolvimento sem OBS/modelo.
 - `obs` + `onnx`: modo real para capturar o OBS e rodar um modelo local.
 
-Para usar captura real do OBS:
-
-```env
-BOTZIN_FRAME_SOURCE=obs
-BOTZIN_OBS_WEBSOCKET_URL=ws://127.0.0.1:4455
-BOTZIN_OBS_WEBSOCKET_PASSWORD=
-BOTZIN_OBS_SOURCE_NAME=Tibia Preview
-```
+Para usar captura real do OBS, abra **Entidades base → Configuração da máquina** no painel, selecione a máquina e configure **Fonte de frames**, **WebSocket do OBS**, **Senha do OBS** e **Fonte do OBS**. A senha é armazenada criptografada no banco.
 
 No OBS Studio, ative o WebSocket em `Ferramentas -> Configuracoes do Servidor WebSocket`.
 
-Para usar IA local:
-
-```env
-BOTZIN_DETECTOR=onnx
-BOTZIN_ONNX_MODEL_PATH=models/tibia-entities.onnx
-BOTZIN_ONNX_LABELS_PATH=models/tibia-entities.example.json
-BOTZIN_ONNX_INPUT_WIDTH=640
-BOTZIN_ONNX_INPUT_HEIGHT=640
-BOTZIN_DETECTION_CONFIDENCE=0.35
-BOTZIN_DETECTION_IOU=0.45
-```
+Para usar IA local, configure no mesmo formulário o detector `onnx`, os caminhos do modelo e labels, a resolução, a confiança e o IoU.
 
 O arquivo de labels deve mapear as classes do modelo:
 
@@ -557,7 +588,7 @@ O detector ONNX espera uma saida estilo YOLO:
 - `[1, N, 5 + classes]`, comum em YOLOv5 com objectness.
 - `[1, C, N]`, tambem suportado.
 
-Sem um modelo treinado em `models/tibia-entities.onnx`, o sistema nao consegue diferenciar player, criatura, NPC e summon. Nesse caso ele retorna erro claro informando que o modelo ainda nao foi conectado.
+O modelo atual em `models/tibia-creatures.onnx` classifica apenas espécies de criaturas. Ele não substitui um modelo separado para distinguir player, NPC e summon. Sem um arquivo ONNX configurado, o sistema retorna erro claro informando que o detector ainda não foi conectado.
 
 ## Próximos passos técnicos
 
@@ -567,7 +598,7 @@ Sem um modelo treinado em `models/tibia-entities.onnx`, o sistema nao consegue d
    - Opcional depois: OCR local para nomes, battle list e textos.
 2. Ligar a confirmação de sources do OBS:
    - Confirmar cena/source ativa via OBS WebSocket.
-   - Validar se `BOTZIN_OBS_SOURCE_NAME` e `BOTZIN_TIBIA_SOURCE_NAME` existem.
+   - Validar se as fontes do OBS e do Tibia cadastradas na máquina existem.
 3. Definir o protocolo final com o Raspberry:
    - HTTP local.
    - WebSocket.
@@ -578,8 +609,8 @@ Sem um modelo treinado em `models/tibia-entities.onnx`, o sistema nao consegue d
 
 A primeira estrutura de verificação ja diferencia:
 
-- OBS aberto: checado pelo processo configurado em `BOTZIN_OBS_PROCESS_NAME`.
-- Tibia aberto: checado pelo processo configurado em `BOTZIN_TIBIA_PROCESS_NAME`.
+- OBS aberto: checado pelo processo configurado no cadastro da máquina.
+- Tibia aberto: checado pelo processo configurado no cadastro da máquina.
 - OBS compartilhado: ponto de integração para confirmar se o preview/source existe.
 - Tibia compartilhado: ponto de integração para confirmar se a source do Tibia esta ativa no OBS.
 
@@ -593,19 +624,11 @@ Cada maquina pode ter mais de uma conexão ativa. A estrutura considera:
 - `wifi`: rede sem fio, util como fallback ou maquina secundaria.
 - `unknown`: interface local que nao foi classificada pelo nome.
 
-Configurações principais:
-
-```env
-BOTZIN_COORDINATOR_HOST=192.168.0.10
-BOTZIN_COORDINATOR_PORT=4573
-BOTZIN_NETWORK_BIND_HOST=0.0.0.0
-BOTZIN_NETWORK_PREFERRED=ethernet,wifi
-BOTZIN_NETWORK_ADVERTISE_HOSTS=192.168.0.10,192.168.1.20
-```
+As configurações de coordenador, bind, redes preferidas e hosts anunciados ficam no cadastro da máquina no painel.
 
 Uso recomendado:
 
-- No PC coordenador, use `BOTZIN_NETWORK_BIND_HOST=0.0.0.0` para escutar cabo e Wi-Fi.
-- Nos PCs de percepção, use `BOTZIN_COORDINATOR_HOST` apontando para o IP mais estavel do coordenador, preferencialmente cabo.
-- Se a maquina tiver dois IPs uteis, liste ambos em `BOTZIN_NETWORK_ADVERTISE_HOSTS`.
+- No PC coordenador, use bind `0.0.0.0` para escutar cabo e Wi-Fi.
+- Nos PCs de percepção, aponte o host coordenador para o IP mais estável, preferencialmente cabo.
+- Se a máquina tiver dois IPs úteis, liste ambos em hosts anunciados.
 - O Raspberry deve ficar na mesma rede local ou receber o IP fixo do coordenador/executor.

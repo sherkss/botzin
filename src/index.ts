@@ -1,4 +1,5 @@
 import { loadRuntimeConfig } from "./config/runtime-config.js";
+import { applyMachineRuntimeConfig } from "./config/machine-runtime-config.js";
 import { InMemoryCoordinator } from "./coordination/in-memory-coordinator.js";
 import { PassiveObservationStrategy } from "./decision/passive-observation-strategy.js";
 import { isEnvironmentReady } from "./environment/check-status.js";
@@ -17,7 +18,15 @@ import { ConfigurationRepository } from "./database/configuration-repository.js"
 import { RuntimeRunCollector } from "./telemetry/runtime-run-collector.js";
 
 async function main(): Promise<void> {
-  const config = loadRuntimeConfig();
+  const bootstrapConfig = loadRuntimeConfig();
+  const pool = createMysqlPool(bootstrapConfig);
+  const repository = new ConfigurationRepository(pool, bootstrapConfig.jwtSecret);
+  const storedMachine = await repository.getMachineRuntimeConfig(bootstrapConfig.nodeId);
+  if (!storedMachine) {
+    await pool.end();
+    throw new Error(`Machine "${bootstrapConfig.nodeId}" is not configured or is disabled. Configure it in the web application first.`);
+  }
+  const config = applyMachineRuntimeConfig(bootstrapConfig, storedMachine.machine, storedMachine.runtime);
   const networkInspector = new LocalNetworkInspector();
   const networkProfile = new NetworkProfileBuilder(config).build(networkInspector.listAddresses());
   const environmentChecker = new RuntimeEnvironmentChecker(
@@ -31,9 +40,8 @@ async function main(): Promise<void> {
   const coordinator = new InMemoryCoordinator();
   const strategy = new PassiveObservationStrategy();
   const decisionStore = new LiveDecisionStore(resolve(config.decisionLogPath));
-  const pool = createMysqlPool(config);
   const runCollector = new RuntimeRunCollector(
-    new ConfigurationRepository(pool), config.nodeId, resolve(config.runCaptureDir), config.runFrameIntervalMs
+    repository, config.nodeId, resolve(config.runCaptureDir), config.runFrameIntervalMs
   );
   const abortController = new AbortController();
   process.once("SIGINT", () => abortController.abort());
@@ -61,6 +69,7 @@ async function main(): Promise<void> {
   );
 
   while (!abortController.signal.aborted) {
+    const cycleStartedAt = performance.now();
     try {
       const perception = await pipeline.inspectCurrentFrame();
       const event = coordinator.ingest(perception);
@@ -74,7 +83,8 @@ async function main(): Promise<void> {
         decision: decision.decision,
         mode: decision.mode,
         entities: decision.entityCounts,
-        commands: decision.commands.length
+        commands: decision.commands.length,
+        latencyMs: Math.round(performance.now() - cycleStartedAt)
       }));
     } catch (error) {
       const decision = errorDecision(config.nodeId, strategy.name, error);

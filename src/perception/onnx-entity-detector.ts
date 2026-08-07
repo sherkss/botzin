@@ -202,7 +202,31 @@ function normalizeRows(data: Float32Array, dims: readonly number[], labelCount: 
   const second = dims[1];
   const third = dims[2];
   const channelCount = labelCount + 4;
+  const channelCountWithObjectness = labelCount + 5;
   const rows: number[][] = [];
+
+  // Prefer an exact channel dimension before applying the generic fallback.
+  // YOLO11 exports [1, 4 + classes, anchors], while some YOLOv5/v8 exports use
+  // [1, anchors, 4/5 + classes]. Large class counts can make both dimensions
+  // exceed channelCount, so checking only ">=" chooses the wrong orientation.
+  if (third === channelCount || third === channelCountWithObjectness) {
+    for (let row = 0; row < second; row += 1) {
+      const offset = row * third;
+      rows.push(Array.from(data.slice(offset, offset + third)));
+    }
+    return rows;
+  }
+
+  if (second === channelCount || second === channelCountWithObjectness) {
+    for (let row = 0; row < third; row += 1) {
+      const values: number[] = [];
+      for (let channel = 0; channel < second; channel += 1) {
+        values.push(data[channel * third + row]);
+      }
+      rows.push(values);
+    }
+    return rows;
+  }
 
   if (third >= channelCount) {
     for (let row = 0; row < second; row += 1) {
@@ -215,9 +239,7 @@ function normalizeRows(data: Float32Array, dims: readonly number[], labelCount: 
   if (second >= channelCount) {
     for (let row = 0; row < third; row += 1) {
       const values: number[] = [];
-      for (let channel = 0; channel < second; channel += 1) {
-        values.push(data[channel * third + row]);
-      }
+      for (let channel = 0; channel < second; channel += 1) values.push(data[channel * third + row]);
       rows.push(values);
     }
     return rows;

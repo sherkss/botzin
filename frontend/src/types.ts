@@ -25,6 +25,35 @@ export interface Machine {
   nodeId: string;
   name: string;
   role?: string;
+  preferredHost?: string | null;
+  connectionNotes?: string | null;
+  runtimeConfig: MachineRuntimeConfig;
+  obsWebSocketPasswordConfigured: boolean;
+  enabled?: boolean;
+}
+
+export interface MachineRuntimeConfig {
+  coordinatorHost: string;
+  coordinatorPort: number;
+  networkBindHost: string;
+  networkPreferredKinds: string[];
+  networkAdvertiseHosts: string[];
+  obsWebSocketUrl: string;
+  obsSourceName: string;
+  frameSource: "mock" | "obs";
+  obsProcessName: string;
+  tibiaProcessName: string;
+  tibiaSourceName: string;
+  detector: "mock" | "onnx";
+  onnxModelPath: string;
+  onnxLabelsPath: string;
+  onnxInputWidth: number;
+  onnxInputHeight: number;
+  detectionConfidence: number;
+  detectionIou: number;
+  raspberryHost: string;
+  raspberryPort: number;
+  runFrameIntervalMs: number;
 }
 
 export interface Hunt {

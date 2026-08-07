@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { rm, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyzeVisualTrainingVideo, ensureLocalVisualModel, visualArtifactPath, type LocalVisualAnalyzerOptions } from "./local-visual-hunt-analyzer.js";
@@ -19,9 +19,10 @@ async function main(): Promise<void> {
     knowledgeRoot: resolve(valueAfter("--knowledge-output") ?? process.env.BOTZIN_KNOWLEDGE_DIR ?? defaultKnowledgeRoot),
     ollamaUrl: process.env.BOTZIN_OLLAMA_URL ?? "http://127.0.0.1:11434",
     model: valueAfter("--model") ?? process.env.BOTZIN_VISUAL_MODEL ?? "gemma3:4b",
-    batchSize: positiveInteger(valueAfter("--batch-size") ?? process.env.BOTZIN_VISUAL_BATCH_SIZE, 4),
+    batchSize: positiveInteger(valueAfter("--batch-size") ?? process.env.BOTZIN_VISUAL_BATCH_SIZE, 1),
     concurrency: positiveInteger(valueAfter("--concurrency") ?? process.env.BOTZIN_VISUAL_CONCURRENCY, 1),
-    retries: positiveInteger(valueAfter("--retries"), 3)
+    retries: positiveInteger(valueAfter("--retries"), 2),
+    requestTimeoutMs: positiveInteger(valueAfter("--timeout-ms") ?? process.env.BOTZIN_OLLAMA_REQUEST_TIMEOUT_MS, 1_200_000)
   };
   await ensureLocalVisualModel(options);
   const dataset = await VisualTrainingDataset.open(visualTrainingRoot);
@@ -37,6 +38,10 @@ async function main(): Promise<void> {
       if (!args.includes("--keep-frames")) {
         await rm(visualArtifactPath(visualTrainingRoot, video.framesDirectory), { recursive: true, force: true });
         updated = { ...updated, framesDeletedAfterAnalysis: true };
+      }
+      if (!args.includes("--keep-video") && updated.videoPath) {
+        await unlink(visualArtifactPath(visualTrainingRoot, updated.videoPath));
+        updated = { ...updated, videoPath: null, sourceVideoDeleted: true };
       }
       await dataset.complete(updated);
       console.log(`[visual-ai] Relatório concluído: ${updated.analysisPath}`);

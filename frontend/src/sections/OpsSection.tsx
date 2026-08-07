@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { CollapsibleCard } from "../components/CollapsibleCard.tsx";
 import { Field, GroupLabel, Input, Select, Textarea } from "../components/Field.tsx";
 import { FormBody, useFormSubmit } from "../components/FormSection.tsx";
@@ -376,27 +376,42 @@ function AssignmentCard({ state, onRefresh }: Props) {
 function AnnotatedLivePreview({ record }: { record: LiveDecisionRecord }) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState("");
+  const imageUrlRef = useRef<string | null>(null);
   const entities = record.entities ?? [];
   const frame = record.frame;
 
   useEffect(() => {
     let disposed = false;
-    let objectUrl = "";
-    void apiFetchBlob(`/api/obs/preview?t=${encodeURIComponent(record.id)}`)
-      .then((blob) => {
+    let refreshTimer: number | undefined;
+
+    const refreshPreview = async (): Promise<void> => {
+      try {
+        const blob = await apiFetchBlob(`/api/obs/preview?t=${Date.now()}`);
         if (disposed) return;
-        objectUrl = URL.createObjectURL(blob);
-        setImageUrl(objectUrl);
+
+        const nextImageUrl = URL.createObjectURL(blob);
+        const previousImageUrl = imageUrlRef.current;
+        imageUrlRef.current = nextImageUrl;
+        setImageUrl(nextImageUrl);
         setPreviewError("");
-      })
-      .catch((error) => {
+        if (previousImageUrl) URL.revokeObjectURL(previousImageUrl);
+      } catch (error) {
         if (!disposed) setPreviewError(error instanceof Error ? error.message : "Preview do OBS indisponível.");
-      });
+      } finally {
+        if (!disposed) refreshTimer = window.setTimeout(() => void refreshPreview(), 750);
+      }
+    };
+
+    void refreshPreview();
     return () => {
       disposed = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      if (imageUrlRef.current) {
+        URL.revokeObjectURL(imageUrlRef.current);
+        imageUrlRef.current = null;
+      }
     };
-  }, [record.id]);
+  }, []);
 
   if (!frame || frame.width <= 0 || frame.height <= 0) return null;
   return (

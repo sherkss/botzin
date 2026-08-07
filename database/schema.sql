@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS bot_machines (
   role ENUM('perception', 'coordinator', 'raspberry-executor') NOT NULL DEFAULT 'perception',
   preferred_host VARCHAR(120) NULL,
   connection_notes TEXT NULL,
+  runtime_config_json JSON NULL,
+  obs_websocket_password_encrypted TEXT NULL,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

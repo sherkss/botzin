@@ -28,6 +28,19 @@ async function main(): Promise<void> {
   await pool.query("ALTER TABLE bot_learning_sources ALTER COLUMN trust_level SET DEFAULT 'low'");
   await pool.query("ALTER TABLE bot_skills MODIFY mana_cost INT UNSIGNED NULL DEFAULT 0");
   await pool.query("ALTER TABLE bot_game_knowledge MODIFY trust_level ENUM('official', 'community', 'user') NOT NULL");
+  const machineColumns: Record<string, string> = {
+    runtime_config_json: "JSON NULL AFTER connection_notes",
+    obs_websocket_password_encrypted: "TEXT NULL AFTER runtime_config_json"
+  };
+  for (const [column, definition] of Object.entries(machineColumns)) {
+    const [columns] = await pool.query<Array<RowDataPacket & { count: number }>>(
+      "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema=? AND table_name='bot_machines' AND column_name=?",
+      [config.mysqlDatabase, column]
+    );
+    if (Number(columns[0]?.count ?? 0) === 0) {
+      await pool.query(`ALTER TABLE bot_machines ADD COLUMN \`${column}\` ${definition}`);
+    }
+  }
   const [multiActionColumns] = await pool.query<Array<RowDataPacket & { count: number }>>(
     "SELECT COUNT(*) AS count FROM information_schema.columns WHERE table_schema=? AND table_name='bot_client_spell_bindings' AND column_name='multi_action_slot'",
     [config.mysqlDatabase]

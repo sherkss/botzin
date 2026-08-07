@@ -1,5 +1,6 @@
 import { CollapsibleCard } from "../components/CollapsibleCard.tsx";
-import { Field, Input, Select, Textarea } from "../components/Field.tsx";
+import { useState } from "react";
+import { Field, GroupLabel, Input, Select, Textarea } from "../components/Field.tsx";
 import { FormBody, useFormSubmit } from "../components/FormSection.tsx";
 import type { AppState } from "../types.ts";
 
@@ -17,7 +18,7 @@ export function EntitiesSection({ state, onRefresh }: Props) {
       <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-4">
         <AccountCard onRefresh={onRefresh} />
         <CharCard state={state} onRefresh={onRefresh} />
-        <MachineCard onRefresh={onRefresh} />
+        <MachineCard state={state} onRefresh={onRefresh} />
         <HuntCard onRefresh={onRefresh} />
         <SkillCard onRefresh={onRefresh} />
         <ClientSpellBindingCard state={state} onRefresh={onRefresh} />
@@ -105,23 +106,70 @@ function CharCard({ state, onRefresh }: Props) {
   );
 }
 
-function MachineCard({ onRefresh }: { onRefresh: () => void }) {
-  const { handleSubmit, busy, msg } = useFormSubmit({ url: "/api/machines", onSuccess: onRefresh });
+function MachineCard({ state, onRefresh }: Props) {
+  const [machineId, setMachineId] = useState("");
+  const machine = state.machines.find((item) => String(item.id) === machineId);
+  const runtime = machine?.runtimeConfig;
+  const { handleSubmit, busy, msg } = useFormSubmit({ url: machine ? `/api/machines/${machine.id}` : "/api/machines", onSuccess: onRefresh });
   return (
-    <CollapsibleCard icon="M" iconKind="machine" title="Maquina">
-      <FormBody onSubmit={handleSubmit} busy={busy} msg={msg} submitLabel="Salvar maquina">
-        <Field label="Node ID"><Input name="nodeId" required placeholder="pc-main" /></Field>
-        <Field label="Nome"><Input name="name" required /></Field>
+    <CollapsibleCard icon="M" iconKind="machine" title="Configuração da máquina" wide>
+      <Field label="Máquina cadastrada">
+        <Select value={machineId} onChange={(event) => setMachineId(event.target.value)}>
+          <option value="">Nova máquina</option>
+          {state.machines.map((item) => <option key={item.id} value={item.id}>{item.name} [{item.nodeId}]</option>)}
+        </Select>
+      </Field>
+      <div className="mt-3" key={machine?.id ?? "new"}>
+      <FormBody onSubmit={handleSubmit} busy={busy} msg={msg} submitLabel={machine ? "Atualizar máquina" : "Salvar máquina"}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field label="Node ID"><Input name="nodeId" required placeholder="pc-main" defaultValue={machine?.nodeId ?? "pc-main"} /></Field>
+        <Field label="Nome"><Input name="name" required defaultValue={machine?.name ?? "Computador principal"} /></Field>
         <Field label="Funcao">
-          <Select name="role">
+          <Select name="role" defaultValue={machine?.role ?? "perception"}>
             <option value="perception">Percepcao</option>
             <option value="coordinator">Coordenador</option>
             <option value="raspberry-executor">Raspberry executor</option>
           </Select>
         </Field>
-        <Field label="Host preferido"><Input name="preferredHost" placeholder="192.168.0.10" /></Field>
-        <Field label="Notas de conexao"><Textarea name="connectionNotes" /></Field>
+        <Field label="Host preferido"><Input name="preferredHost" placeholder="192.168.0.10" defaultValue={machine?.preferredHost ?? ""} /></Field>
+        <Field label="Host coordenador"><Input name="coordinatorHost" defaultValue={runtime?.coordinatorHost ?? "127.0.0.1"} /></Field>
+        <Field label="Porta coordenador"><Input name="coordinatorPort" type="number" defaultValue={runtime?.coordinatorPort ?? 4573} /></Field>
+        </div>
+
+        <GroupLabel>Captura do OBS</GroupLabel>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field label="Fonte de frames"><Select name="frameSource" defaultValue={runtime?.frameSource ?? "obs"}><option value="obs">OBS</option><option value="mock">Simulação</option></Select></Field>
+        <Field label="WebSocket do OBS"><Input name="obsWebSocketUrl" defaultValue={runtime?.obsWebSocketUrl ?? "ws://127.0.0.1:4455"} /></Field>
+        <Field label="Fonte do OBS"><Input name="obsSourceName" defaultValue={runtime?.obsSourceName ?? "Tibia Preview"} /></Field>
+        <Field label="Senha do OBS"><Input name="obsWebSocketPassword" type="password" placeholder={machine?.obsWebSocketPasswordConfigured ? "Configurada — deixe vazio para manter" : "Senha do WebSocket"} /></Field>
+        <Field label="Processo do OBS"><Input name="obsProcessName" defaultValue={runtime?.obsProcessName ?? "obs64.exe"} /></Field>
+        <Field label="Processo do Tibia"><Input name="tibiaProcessName" defaultValue={runtime?.tibiaProcessName ?? "client.exe"} /></Field>
+        <Field label="Fonte do Tibia"><Input name="tibiaSourceName" defaultValue={runtime?.tibiaSourceName ?? "Tibia"} /></Field>
+        </div>
+
+        <GroupLabel>Detector local</GroupLabel>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field label="Detector"><Select name="detector" defaultValue={runtime?.detector ?? "onnx"}><option value="onnx">ONNX</option><option value="mock">Simulação</option></Select></Field>
+        <Field label="Modelo ONNX"><Input name="onnxModelPath" defaultValue={runtime?.onnxModelPath ?? "models/tibia-creatures.onnx"} /></Field>
+        <Field label="Labels ONNX"><Input name="onnxLabelsPath" defaultValue={runtime?.onnxLabelsPath ?? "models/tibia-creatures.labels.json"} /></Field>
+        <Field label="Largura"><Input name="onnxInputWidth" type="number" defaultValue={runtime?.onnxInputWidth ?? 320} /></Field>
+        <Field label="Altura"><Input name="onnxInputHeight" type="number" defaultValue={runtime?.onnxInputHeight ?? 320} /></Field>
+        <Field label="Confiança (0–1)"><Input name="detectionConfidence" type="number" min="0" max="1" step="0.01" defaultValue={runtime?.detectionConfidence ?? 0.35} /></Field>
+        <Field label="IoU (0–1)"><Input name="detectionIou" type="number" min="0" max="1" step="0.01" defaultValue={runtime?.detectionIou ?? 0.45} /></Field>
+        <Field label="Intervalo de captura (ms)"><Input name="runFrameIntervalMs" type="number" defaultValue={runtime?.runFrameIntervalMs ?? 10000} /></Field>
+        </div>
+
+        <GroupLabel>Rede e executor</GroupLabel>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field label="Bind da rede"><Input name="networkBindHost" defaultValue={runtime?.networkBindHost ?? "0.0.0.0"} /></Field>
+        <Field label="Redes preferidas"><Input name="networkPreferredKinds" defaultValue={runtime?.networkPreferredKinds.join(",") ?? "ethernet,wifi"} /></Field>
+        <Field label="Hosts anunciados"><Input name="networkAdvertiseHosts" defaultValue={runtime?.networkAdvertiseHosts.join(",") ?? ""} /></Field>
+        <Field label="Host Raspberry"><Input name="raspberryHost" defaultValue={runtime?.raspberryHost ?? "127.0.0.1"} /></Field>
+        <Field label="Porta Raspberry"><Input name="raspberryPort" type="number" defaultValue={runtime?.raspberryPort ?? 4574} /></Field>
+        <Field label="Notas de conexão" className="sm:col-span-3"><Textarea name="connectionNotes" defaultValue={machine?.connectionNotes ?? ""} /></Field>
+        </div>
       </FormBody>
+      </div>
     </CollapsibleCard>
   );
 }

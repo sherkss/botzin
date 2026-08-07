@@ -83,6 +83,34 @@ export interface CatalogPage<T> {
 export class GameCatalogRepository {
   constructor(private readonly pool: Pool) {}
 
+  async listCreatureAnimationSources(): Promise<readonly Pick<CreatureCatalogRecord, "id" | "race" | "name" | "imageUrl">[]> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      "SELECT id, race, name, image_url FROM bot_creature_catalog ORDER BY name"
+    );
+    return rows.map((row) => ({
+      id: Number(row.id),
+      race: String(row.race),
+      name: String(row.name),
+      imageUrl: nullableString(row.image_url)
+    }));
+  }
+
+  async findCreatureByRace(race: string): Promise<CreatureCatalogRecord | null> {
+    const [rows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT id, race, name, image_url, description, behaviour, hitpoints, experience,
+              CAST(immune_json AS CHAR) AS immune_json, CAST(strong_json AS CHAR) AS strong_json,
+              CAST(weakness_json AS CHAR) AS weakness_json, CAST(healed_json AS CHAR) AS healed_json,
+              can_be_paralysed, can_be_summoned, summoned_mana, can_be_convinced, convinced_mana,
+              sees_invisible, lootable, CAST(loot_json AS CHAR) AS loot_json, armor, mitigation, max_damage,
+              CAST(damage_by_type_json AS CHAR) AS damage_by_type_json, CAST(damage_modifiers_json AS CHAR) AS damage_modifiers_json,
+              CAST(attacks_json AS CHAR) AS attacks_json, location, CAST(loot_details_json AS CHAR) AS loot_details_json,
+              community_source_url, community_source_updated_at, source_url
+         FROM bot_creature_catalog WHERE race = ? LIMIT 1`,
+      [race]
+    );
+    return rows[0] ? mapCreature(rows[0]) : null;
+  }
+
   async searchCreatures(query: string, limit: number, offset: number): Promise<CatalogPage<CreatureCatalogRecord>> {
     const pattern = `%${escapeLike(query)}%`;
     const where = query ? "WHERE name LIKE ? ESCAPE '\\\\' OR race LIKE ? ESCAPE '\\\\' OR location LIKE ? ESCAPE '\\\\' OR CAST(loot_details_json AS CHAR) LIKE ? ESCAPE '\\\\'" : "";

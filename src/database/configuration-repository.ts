@@ -1,5 +1,7 @@
 import type { Pool, ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { ValidationError } from "../core/errors.js";
+import { DEFAULT_MACHINE_RUNTIME_CONFIG } from "../config/machine-runtime-config.js";
 import type {
   BotAccount,
   BotCharacter,
@@ -18,11 +20,17 @@ import type {
   BotLearningSession,
   BotLearningSource,
   BotMachine,
+  MachineRuntimeConfig,
+  MachineRuntimeConfigWithSecret,
   BotSkill
 } from "../core/bot-configuration.js";
 
 export class ConfigurationRepository {
-  constructor(private readonly pool: Pool) {}
+  private readonly machineSecretKey: Buffer | null;
+
+  constructor(private readonly pool: Pool, secretKey?: string) {
+    this.machineSecretKey = secretKey ? createHash("sha256").update(secretKey).digest() : null;
+  }
 
   async getSnapshot(): Promise<BotConfigurationSnapshot> {
     const [
@@ -126,24 +134,94 @@ export class ConfigurationRepository {
 
   async listMachines(): Promise<readonly BotMachine[]> {
     const [rows] = await this.pool.query<RowDataPacket[]>(
-      "SELECT id, node_id, name, role, preferred_host, connection_notes, enabled FROM bot_machines ORDER BY name"
+      "SELECT id, node_id, name, role, preferred_host, connection_notes, CAST(runtime_config_json AS CHAR) AS runtime_config_json, obs_websocket_password_encrypted, enabled FROM bot_machines ORDER BY name"
     );
     return rows.map(mapMachine);
   }
 
   async createMachine(input: Record<string, unknown>): Promise<BotMachine> {
+    const runtimeConfig = machineRuntimeConfigFromInput(input);
+    const encryptedPassword = this.encryptMachineSecret(nullableString(input.obsWebSocketPassword));
     const [result] = await this.pool.execute<ResultSetHeader>(
-      "INSERT INTO bot_machines (node_id, name, role, preferred_host, connection_notes, enabled) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO bot_machines (node_id, name, role, preferred_host, connection_notes, runtime_config_json, obs_websocket_password_encrypted, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [
         requiredString(input.nodeId, "nodeId"),
         requiredString(input.name, "name"),
         enumValue(input.role, ["perception", "coordinator", "raspberry-executor"] as const, "perception", "role"),
         nullableString(input.preferredHost),
         nullableString(input.connectionNotes),
+        JSON.stringify(runtimeConfig),
+        encryptedPassword,
         booleanValue(input.enabled, true)
       ]
     );
     return this.getMachine(result.insertId);
+  }
+
+  async updateMachine(id: number, input: Record<string, unknown>): Promise<BotMachine> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT CAST(runtime_config_json AS CHAR) AS runtime_config_json, obs_websocket_password_encrypted FROM bot_machines WHERE id = ?",
+      [id]
+    );
+    if (rows.length !== 1) throw new ValidationError("Machine was not found.");
+    const runtimeConfig = machineRuntimeConfigFromInput(input, parseStoredMachineRuntimeConfig(rows[0].runtime_config_json));
+    const suppliedPassword = nullableString(input.obsWebSocketPassword);
+    const encryptedPassword = suppliedPassword
+      ? this.encryptMachineSecret(suppliedPassword)
+      : nullableRowString(rows[0].obs_websocket_password_encrypted);
+    await this.pool.execute(
+      `UPDATE bot_machines
+          SET node_id = ?, name = ?, role = ?, preferred_host = ?, connection_notes = ?,
+              runtime_config_json = ?, obs_websocket_password_encrypted = ?, enabled = ?
+        WHERE id = ?`,
+      [
+        requiredString(input.nodeId, "nodeId"),
+        requiredString(input.name, "name"),
+        enumValue(input.role, ["perception", "coordinator", "raspberry-executor"] as const, "perception", "role"),
+        nullableString(input.preferredHost),
+        nullableString(input.connectionNotes),
+        JSON.stringify(runtimeConfig),
+        encryptedPassword,
+        booleanValue(input.enabled, true),
+        id
+      ]
+    );
+    return this.getMachine(id);
+  }
+
+  async getMachineRuntimeConfig(nodeId: string): Promise<{ machine: BotMachine; runtime: MachineRuntimeConfigWithSecret } | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT id, node_id, name, role, preferred_host, connection_notes, CAST(runtime_config_json AS CHAR) AS runtime_config_json, obs_websocket_password_encrypted, enabled FROM bot_machines WHERE node_id = ? AND enabled = TRUE",
+      [nodeId]
+    );
+    if (rows.length === 0) return null;
+    const machine = mapMachine(rows[0]);
+    return {
+      machine,
+      runtime: {
+        ...machine.runtimeConfig,
+        obsWebSocketPassword: this.decryptMachineSecret(nullableRowString(rows[0].obs_websocket_password_encrypted))
+      }
+    };
+  }
+
+  private encryptMachineSecret(value: string | null): string | null {
+    if (!value) return null;
+    if (!this.machineSecretKey) throw new ValidationError("Machine secret encryption is not configured.");
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", this.machineSecretKey, iv);
+    const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+    return `v1:${iv.toString("base64")}:${cipher.getAuthTag().toString("base64")}:${encrypted.toString("base64")}`;
+  }
+
+  private decryptMachineSecret(value: string | null): string {
+    if (!value) return "";
+    if (!this.machineSecretKey) throw new Error("Machine secret encryption is not configured.");
+    const [version, iv, tag, encrypted] = value.split(":");
+    if (version !== "v1" || !iv || !tag || !encrypted) throw new Error("Machine secret is invalid.");
+    const decipher = createDecipheriv("aes-256-gcm", this.machineSecretKey, Buffer.from(iv, "base64"));
+    decipher.setAuthTag(Buffer.from(tag, "base64"));
+    return Buffer.concat([decipher.update(Buffer.from(encrypted, "base64")), decipher.final()]).toString("utf8");
   }
 
   async listHunts(): Promise<readonly BotHunt[]> {
@@ -688,7 +766,7 @@ export class ConfigurationRepository {
 
   private async getMachine(id: number): Promise<BotMachine> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      "SELECT id, node_id, name, role, preferred_host, connection_notes, enabled FROM bot_machines WHERE id = ?",
+      "SELECT id, node_id, name, role, preferred_host, connection_notes, CAST(runtime_config_json AS CHAR) AS runtime_config_json, obs_websocket_password_encrypted, enabled FROM bot_machines WHERE id = ?",
       [id]
     );
     return mapSingle(rows, mapMachine);
@@ -838,7 +916,48 @@ function mapMachine(row: RowDataPacket): BotMachine {
     role: String(row.role),
     preferredHost: nullableRowString(row.preferred_host),
     connectionNotes: nullableRowString(row.connection_notes),
+    runtimeConfig: parseStoredMachineRuntimeConfig(row.runtime_config_json),
+    obsWebSocketPasswordConfigured: Boolean(nullableRowString(row.obs_websocket_password_encrypted)),
     enabled: Boolean(row.enabled)
+  };
+}
+
+function parseStoredMachineRuntimeConfig(value: unknown): MachineRuntimeConfig {
+  if (typeof value !== "string" || !value.trim()) return DEFAULT_MACHINE_RUNTIME_CONFIG;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    return machineRuntimeConfigFromInput(parsed);
+  } catch {
+    return DEFAULT_MACHINE_RUNTIME_CONFIG;
+  }
+}
+
+function machineRuntimeConfigFromInput(
+  input: Record<string, unknown>,
+  fallback: MachineRuntimeConfig = DEFAULT_MACHINE_RUNTIME_CONFIG
+): MachineRuntimeConfig {
+  return {
+    coordinatorHost: stringValue(input.coordinatorHost, fallback.coordinatorHost),
+    coordinatorPort: boundedInteger(input.coordinatorPort, fallback.coordinatorPort, 1, 65_535, "coordinatorPort"),
+    networkBindHost: stringValue(input.networkBindHost, fallback.networkBindHost),
+    networkPreferredKinds: csvValue(input.networkPreferredKinds, fallback.networkPreferredKinds),
+    networkAdvertiseHosts: csvValue(input.networkAdvertiseHosts, fallback.networkAdvertiseHosts),
+    obsWebSocketUrl: stringValue(input.obsWebSocketUrl, fallback.obsWebSocketUrl),
+    obsSourceName: stringValue(input.obsSourceName, fallback.obsSourceName),
+    frameSource: enumValue(input.frameSource, ["mock", "obs"] as const, fallback.frameSource, "frameSource"),
+    obsProcessName: stringValue(input.obsProcessName, fallback.obsProcessName),
+    tibiaProcessName: stringValue(input.tibiaProcessName, fallback.tibiaProcessName),
+    tibiaSourceName: stringValue(input.tibiaSourceName, fallback.tibiaSourceName),
+    detector: enumValue(input.detector, ["mock", "onnx"] as const, fallback.detector, "detector"),
+    onnxModelPath: stringValue(input.onnxModelPath, fallback.onnxModelPath),
+    onnxLabelsPath: stringValue(input.onnxLabelsPath, fallback.onnxLabelsPath),
+    onnxInputWidth: boundedInteger(input.onnxInputWidth, fallback.onnxInputWidth, 32, 4096, "onnxInputWidth"),
+    onnxInputHeight: boundedInteger(input.onnxInputHeight, fallback.onnxInputHeight, 32, 4096, "onnxInputHeight"),
+    detectionConfidence: boundedNumber(input.detectionConfidence, fallback.detectionConfidence, 0, 1, "detectionConfidence"),
+    detectionIou: boundedNumber(input.detectionIou, fallback.detectionIou, 0, 1, "detectionIou"),
+    raspberryHost: stringValue(input.raspberryHost, fallback.raspberryHost),
+    raspberryPort: boundedInteger(input.raspberryPort, fallback.raspberryPort, 1, 65_535, "raspberryPort"),
+    runFrameIntervalMs: boundedInteger(input.runFrameIntervalMs, fallback.runFrameIntervalMs, 100, 3_600_000, "runFrameIntervalMs")
   };
 }
 
@@ -1078,6 +1197,18 @@ function stringValue(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+function csvValue(value: unknown, fallback: readonly string[]): readonly string[] {
+  if (Array.isArray(value)) {
+    const parsed = value.map(String).map((item) => item.trim()).filter(Boolean);
+    return parsed.length > 0 ? parsed : fallback;
+  }
+  if (typeof value === "string") {
+    const parsed = value.split(",").map((item) => item.trim()).filter(Boolean);
+    return parsed.length > 0 ? parsed : fallback;
+  }
+  return fallback;
+}
+
 function nullableString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
@@ -1165,6 +1296,15 @@ function nullableFiniteNumber(value: unknown, field: string): number | null {
 function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number, field: string): number {
   const parsed = integerValue(value, fallback, field);
   if (parsed < minimum || parsed > maximum) {
+    throw new ValidationError(`Field "${field}" must be between ${minimum} and ${maximum}.`);
+  }
+  return parsed;
+}
+
+function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number, field: string): number {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) {
     throw new ValidationError(`Field "${field}" must be between ${minimum} and ${maximum}.`);
   }
   return parsed;

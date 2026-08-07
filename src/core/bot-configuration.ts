@@ -24,7 +24,37 @@ export interface BotMachine {
   readonly role: string;
   readonly preferredHost: string | null;
   readonly connectionNotes: string | null;
+  readonly runtimeConfig: MachineRuntimeConfig;
+  readonly obsWebSocketPasswordConfigured: boolean;
   readonly enabled: boolean;
+}
+
+export interface MachineRuntimeConfig {
+  readonly coordinatorHost: string;
+  readonly coordinatorPort: number;
+  readonly networkBindHost: string;
+  readonly networkPreferredKinds: readonly string[];
+  readonly networkAdvertiseHosts: readonly string[];
+  readonly obsWebSocketUrl: string;
+  readonly obsSourceName: string;
+  readonly frameSource: "mock" | "obs";
+  readonly obsProcessName: string;
+  readonly tibiaProcessName: string;
+  readonly tibiaSourceName: string;
+  readonly detector: "mock" | "onnx";
+  readonly onnxModelPath: string;
+  readonly onnxLabelsPath: string;
+  readonly onnxInputWidth: number;
+  readonly onnxInputHeight: number;
+  readonly detectionConfidence: number;
+  readonly detectionIou: number;
+  readonly raspberryHost: string;
+  readonly raspberryPort: number;
+  readonly runFrameIntervalMs: number;
+}
+
+export interface MachineRuntimeConfigWithSecret extends MachineRuntimeConfig {
+  readonly obsWebSocketPassword: string;
 }
 
 export interface BotHunt {
