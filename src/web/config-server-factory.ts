@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, stat, unlink } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { basename, extname, join, normalize } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -23,6 +23,9 @@ import { LiveDecisionStore } from "../decision/live-decision-store.js";
 import { parseSessionAnalyser } from "../telemetry/session-analyser-parser.js";
 import { importCreatureAnimation } from "../knowledge/creature-animation-importer.js";
 import { CreatureAnimationBatchJob } from "../knowledge/creature-animation-batch.js";
+import { importItemAsset } from "../knowledge/item-asset-importer.js";
+import { ItemAssetBatchJob } from "../knowledge/item-asset-batch.js";
+import { fetchTibiaItemImageSources } from "../learning/tibia-game-catalog.js";
 
 const MAX_JSON_BYTES = 1024 * 1024;
 const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024;
@@ -155,6 +158,8 @@ export function createConfigServer(
   let obsPreviewFingerprint = "";
   const creatureAnimationRoot = join(knowledgeDir, "creature-assets");
   const creatureAnimationBatch = new CreatureAnimationBatchJob(creatureAnimationRoot);
+  const itemAssetRoot = join(knowledgeDir, "item-assets");
+  const itemAssetBatch = new ItemAssetBatchJob(itemAssetRoot);
   const loginFailures = new Map<string, { count: number; resetAt: number }>();
   const dummyPasswordHash = bcrypt.hash(randomUUID(), 12);
 
@@ -185,6 +190,30 @@ export function createConfigServer(
       requireRole(user, "viewer");
       const options = catalogSearchOptions(requestUrl);
       sendJson(response, 200, await gameCatalogRepository.searchCreatures(options.query, options.limit, options.offset));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/spell-icons") {
+      requireRole(user, "viewer");
+      sendJson(response, 200, await readSpellIconLinks());
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/spell-icons/image") {
+      requireRole(user, "viewer");
+      const iconPath = await resolveSpellIconPath(requestUrl.searchParams.get("spell"));
+      if (!iconPath) throw httpError(404, "Spell icon was not found.");
+      const iconStat = await stat(iconPath).catch(() => null);
+      if (!iconStat?.isFile()) throw httpError(404, "Spell icon was not found.");
+      response.writeHead(200, {
+        "Content-Type": "image/png",
+        // The icons come out of an immutable client build, so they can be cached hard.
+        "Cache-Control": "public, max-age=86400",
+        "X-Content-Type-Options": "nosniff"
+      });
+      const iconStream = createReadStream(iconPath);
+      iconStream.on("error", () => response.destroy());
+      iconStream.pipe(response);
       return;
     }
 
@@ -241,6 +270,40 @@ export function createConfigServer(
       requireRole(user, "viewer");
       const status = await creatureAnimationBatch.getStatus();
       sendJson(response, status ? 200 : 404, status ?? { error: "No creature animation import job was found." });
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/item-assets/import") {
+      requireRole(user, "operator");
+      const payload = await readJson(request);
+      const sourceId = Number(payload.sourceId);
+      if (!Number.isSafeInteger(sourceId) || sourceId < 1) throw new ValidationError("sourceId is required.");
+      const name = typeof payload.name === "string" && payload.name.trim() ? payload.name.trim() : `item ${sourceId}`;
+      const result = await importItemAsset({ root: itemAssetRoot, identity: { sourceId, name } });
+      sendJson(response, result.cached ? 200 : 201, result);
+      return;
+    }
+
+    if (method === "POST" && pathname === "/api/item-assets/import-all") {
+      requireRole(user, "operator");
+      const payload = await readJson(request);
+      const delayMs = payload.delayMs === undefined ? 120 : Number(payload.delayMs);
+      const concurrency = payload.concurrency === undefined ? 4 : Number(payload.concurrency);
+      const limit = payload.limit === undefined ? null : Number(payload.limit);
+      if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > 10_000)) {
+        throw new ValidationError("limit must be an integer between 1 and 10000.");
+      }
+      const catalog = await fetchTibiaItemImageSources(undefined, undefined, limit);
+      const selected = limit === null ? catalog : catalog.slice(0, limit);
+      const status = await itemAssetBatch.start(selected, delayMs, concurrency);
+      sendJson(response, 202, status);
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/item-assets/import-all/status") {
+      requireRole(user, "viewer");
+      const status = await itemAssetBatch.getStatus();
+      sendJson(response, status ? 200 : 404, status ?? { error: "No item asset import job was found." });
       return;
     }
 
@@ -579,6 +642,59 @@ export function createConfigServer(
       return;
     }
     current.count += 1;
+  }
+
+  interface SpellIconLink {
+    readonly id: string;
+    readonly name: string;
+    readonly type: string;
+    readonly group: string;
+    readonly words: string | null;
+    readonly source?: string | null;
+    readonly iconIndex?: number;
+    readonly spriteId?: number;
+  }
+
+  let spellIconCache: { mtimeMs: number; links: readonly SpellIconLink[]; byId: ReadonlyMap<string, SpellIconLink> } | null = null;
+
+  // The grid fetches every icon individually right after loading the list, so an
+  // uncached implementation would re-read and re-parse the links file hundreds of
+  // times per page view. The mtime check keeps a re-run of the linking script visible.
+  async function loadSpellIconLinks(): Promise<{ links: readonly SpellIconLink[]; byId: ReadonlyMap<string, SpellIconLink> }> {
+    const path = join(knowledgeDir, "spell-icon-links.json");
+    try {
+      const mtimeMs = (await stat(path)).mtimeMs;
+      if (spellIconCache?.mtimeMs !== mtimeMs) {
+        const payload = JSON.parse(await readFile(path, "utf8")) as { links?: readonly SpellIconLink[] };
+        const links = payload.links ?? [];
+        spellIconCache = { mtimeMs, links, byId: new Map(links.map((link) => [link.id, link])) };
+      }
+      return spellIconCache;
+    } catch {
+      // The linking step is optional tooling; an unprepared install just has no icons.
+      return { links: [], byId: new Map() };
+    }
+  }
+
+  async function readSpellIconLinks(): Promise<{ links: readonly SpellIconLink[] }> {
+    return { links: (await loadSpellIconLinks()).links };
+  }
+
+  async function resolveSpellIconPath(spellId: string | null): Promise<string | null> {
+    if (!spellId) return null;
+    const link = (await loadSpellIconLinks()).byId.get(spellId);
+    if (!link?.source) return null;
+    // Both branches build the path from numbers, so a crafted id cannot escape the root.
+    if (link.source === "client-atlas" && Number.isSafeInteger(link.iconIndex)) {
+      const name = String(link.iconIndex).padStart(3, "0");
+      return join(knowledgeDir, "client-spell-icons", "spell-icons-32x32", `${name}.png`);
+    }
+    if (link.source === "client-object" && Number.isSafeInteger(link.spriteId)) {
+      const sprite = link.spriteId as number;
+      const shard = String(Math.floor(sprite / 1000)).padStart(4, "0");
+      return join(knowledgeDir, "client-sprites", shard, `${sprite}.png`);
+    }
+    return null;
   }
 
   function requireRole(user: AuthenticatedConfigUser, role: ConfigUserRole): void {

@@ -948,6 +948,7 @@ function machineRuntimeConfigFromInput(
     obsProcessName: stringValue(input.obsProcessName, fallback.obsProcessName),
     tibiaProcessName: stringValue(input.tibiaProcessName, fallback.tibiaProcessName),
     tibiaSourceName: stringValue(input.tibiaSourceName, fallback.tibiaSourceName),
+    obsCaptureWidth: boundedInteger(input.obsCaptureWidth, fallback.obsCaptureWidth, 32, 4096, "obsCaptureWidth"),
     detector: enumValue(input.detector, ["mock", "onnx"] as const, fallback.detector, "detector"),
     onnxModelPath: stringValue(input.onnxModelPath, fallback.onnxModelPath),
     onnxLabelsPath: stringValue(input.onnxLabelsPath, fallback.onnxLabelsPath),

@@ -1,9 +1,24 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { apiFetch } from "../api.ts";
 import type { CatalogPage, CreatureCatalogRecord, GameKnowledgeCoverage, GameKnowledgeRecord, ItemCatalogRecord, TibiaLiveStatus } from "../types.ts";
+import { Search } from "lucide-react";
+import { EmptyState, ErrorState, LoadingState, PageHeader } from "../components/ui.tsx";
 
 type CatalogKind = "creatures" | "items" | "knowledge";
+// A phase discriminant instead of comparing the display strings themselves:
+// rewording a message must not silently change which state gets rendered.
+type CatalogStatus =
+  | { phase: "loading" }
+  | { phase: "ready" }
+  | { phase: "empty" }
+  | { phase: "error"; message: string };
 const PAGE_SIZE = 25;
+
+function statusLabel(status: CatalogStatus): string {
+  if (status.phase === "loading") return "Carregando catálogo...";
+  if (status.phase === "empty") return "Nenhum resultado encontrado.";
+  return status.phase === "error" ? status.message : "";
+}
 
 export function CatalogPage() {
   const [kind, setKind] = useState<CatalogKind>("creatures");
@@ -14,21 +29,21 @@ export function CatalogPage() {
   const [page, setPage] = useState<CatalogPage<CreatureCatalogRecord | ItemCatalogRecord | GameKnowledgeRecord> | null>(null);
   const [coverage, setCoverage] = useState<GameKnowledgeCoverage | null>(null);
   const [liveStatus, setLiveStatus] = useState<TibiaLiveStatus | null>(null);
-  const [status, setStatus] = useState("Carregando catálogo...");
+  const [status, setStatus] = useState<CatalogStatus>({ phase: "loading" });
 
   useEffect(() => {
     let active = true;
-    setStatus("Carregando catálogo...");
+    setStatus({ phase: "loading" });
     const params = new URLSearchParams({ q: query, limit: String(PAGE_SIZE), offset: String(offset) });
     if (kind === "knowledge" && domain) params.set("domain", domain);
     void apiFetch<CatalogPage<CreatureCatalogRecord | ItemCatalogRecord | GameKnowledgeRecord>>(`/api/catalog/${kind}?${params}`)
       .then((value) => {
         if (!active) return;
         setPage(value);
-        setStatus(value.total === 0 ? "Nenhum resultado encontrado." : "");
+        setStatus(value.total === 0 ? { phase: "empty" } : { phase: "ready" });
       })
       .catch((error: unknown) => {
-        if (active) setStatus(error instanceof Error ? error.message : "Falha ao consultar catálogo.");
+        if (active) setStatus({ phase: "error", message: error instanceof Error ? error.message : "Falha ao consultar catálogo." });
       });
     return () => { active = false; };
   }, [kind, domain, query, offset]);
@@ -58,23 +73,20 @@ export function CatalogPage() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <div className="border-b border-border px-6 py-5">
-        <h1 className="text-[18px] font-semibold">Catálogo do jogo</h1>
-        <p className="mt-0.5 text-[13px] text-muted">Criaturas, itens e conhecimento estruturado consultado pela IA</p>
-      </div>
+      <PageHeader eyebrow="Base de conhecimento" title="Catálogo do jogo" description="Explore criaturas, itens e conhecimento estruturado consultado pela inteligência do sistema." />
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <Tab active={kind === "creatures"} onClick={() => selectKind("creatures")}>Criaturas</Tab>
           <Tab active={kind === "items"} onClick={() => selectKind("items")}>Itens</Tab>
           <Tab active={kind === "knowledge"} onClick={() => selectKind("knowledge")}>Conhecimento</Tab>
-          <form onSubmit={search} className="ml-auto flex min-w-[280px] gap-2">
+          <form onSubmit={search} className="catalog-search ml-auto flex min-w-[280px] gap-2">
             <input
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               placeholder={kind === "creatures" ? "Buscar dragon, demon..." : kind === "items" ? "Buscar armor, potion..." : "Buscar quest, cidade, boss..."}
               className="min-w-0 flex-1 rounded-[6px] border border-border bg-bg px-3 py-2 text-[12px] outline-none focus:border-link"
             />
-            <button className="rounded-[6px] bg-accent px-4 py-2 text-[12px] font-medium text-white">Buscar</button>
+            <button className="rounded-[6px] bg-accent px-4 py-2 text-[12px] font-medium text-white"><Search size={15} />Buscar</button>
           </form>
         </div>
 
@@ -108,12 +120,12 @@ export function CatalogPage() {
         )}
 
         <div className="mb-3 flex items-center justify-between text-[12px] text-muted">
-          <span>{page ? `${page.total.toLocaleString("pt-BR")} registros` : status}</span>
+          <span>{page ? `${page.total.toLocaleString("pt-BR")} registros` : statusLabel(status)}</span>
           {query && <span>Busca: “{query}”</span>}
         </div>
 
-        {status && !page?.items.length ? (
-          <div className="rounded-[8px] border border-border bg-surface p-5 text-[13px] text-muted">{status}</div>
+        {status.phase !== "ready" && !page?.items.length ? (
+          status.phase === "loading" ? <LoadingState label={statusLabel(status)} /> : status.phase === "empty" ? <EmptyState description="Tente ajustar os termos da busca ou selecionar outra categoria." /> : <ErrorState message={status.message} />
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3">
             {page?.items.map((record) => kind === "creatures"

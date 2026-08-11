@@ -1,62 +1,28 @@
 import { useState, type FormEvent } from "react";
+import { AlertCircle, Bot, LoaderCircle, LockKeyhole, ShieldCheck, UserRound } from "lucide-react";
 import { Field, Input } from "./Field.tsx";
+import { Button } from "./ui.tsx";
 
-interface Props {
-  onLogin: (username: string, password: string) => Promise<void>;
-}
-
+interface Props { onLogin: (username: string, password: string) => Promise<void>; }
 export function LoginPanel({ onLogin }: Props) {
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const data = new FormData(e.currentTarget);
-    setBusy(true);
-    setError("");
-    try {
-      await onLogin(String(data.get("username")), String(data.get("password")));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao entrar");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-1 items-center justify-center bg-bg p-10">
-      <div className="w-full max-w-sm rounded-[10px] border border-border bg-surface p-8">
-        <div className="mb-7 text-center">
-          <div className="mx-auto mb-3.5 flex h-13 w-13 items-center justify-center rounded-[12px] bg-accent text-[22px] font-bold text-white">
-            B
-          </div>
-          <h1 className="text-[18px] font-semibold">Botzin</h1>
-          <p className="mt-1 text-[13px] text-muted">Entre com suas credenciais de acesso</p>
+  const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) { e.preventDefault(); const data = new FormData(e.currentTarget); setBusy(true); setError(""); try { await onLogin(String(data.get("username")), String(data.get("password"))); } catch (err) { setError(err instanceof Error ? err.message : "Erro ao entrar"); } finally { setBusy(false); } }
+  return <div className="login-layout">
+    <aside className="login-story">
+      <div><span className="login-kicker"><ShieldCheck size={15} /> Ambiente seguro</span><h1>Automação inteligente.<br /><span>Controle absoluto.</span></h1><p>Centralize operações, aprendizado e monitoramento do seu ecossistema em um só lugar.</p></div>
+      <div className="login-status"><i /><span><strong>Sistema operacional</strong><small>Todos os serviços respondendo normalmente</small></span></div>
+    </aside>
+    <main className="login-panel">
+      <form onSubmit={handleSubmit} className="login-card">
+        <span className="brand-mark"><Bot size={22} /></span><h2>Bem-vindo de volta</h2><p className="login-subtitle">Use suas credenciais para acessar o workspace.</p>
+        <div className="login-fields">
+          <Field label="Usuário" required><div className="input-with-icon"><UserRound size={16} /><Input name="username" autoComplete="username" required placeholder="Seu usuário" autoFocus /></div></Field>
+          <Field label="Senha" required><div className="input-with-icon"><LockKeyhole size={16} /><Input name="password" type="password" autoComplete="current-password" required placeholder="Sua senha" /></div></Field>
         </div>
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
-          <Field label="Usuario">
-            <Input name="username" autoComplete="username" required placeholder="admin" />
-          </Field>
-          <Field label="Senha">
-            <Input name="password" type="password" autoComplete="current-password" required placeholder="••••••••" />
-          </Field>
-
-          {error && (
-            <p className="rounded-[6px] border border-[#f8514933] bg-[#f8514910] px-3 py-2 text-[12px] text-[#f85149]">
-              {error}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={busy}
-            className="mt-1 w-full rounded-[6px] border border-white/10 bg-accent px-4 py-2 text-[13px] font-medium text-white transition-colors duration-[120ms] hover:bg-accent-hover disabled:opacity-60"
-          >
-            {busy ? "Entrando..." : "Entrar"}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
+        {error && <p className="login-error" role="alert"><AlertCircle size={15} />{error}</p>}
+        <Button type="submit" variant="primary" disabled={busy} className="w-full">{busy && <LoaderCircle className="animate-spin" size={16} />}{busy ? "Autenticando..." : "Entrar no sistema"}</Button>
+        <p className="login-help">Acesso restrito a usuários autorizados.</p>
+      </form>
+    </main>
+  </div>;
 }

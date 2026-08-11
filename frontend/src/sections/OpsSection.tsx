@@ -252,6 +252,9 @@ function LiveDecisionCard() {
             <DecisionMetric label="Criaturas" value={latest.entityCounts.creature} />
             <DecisionMetric label="NPCs" value={latest.entityCounts.npc} />
             <DecisionMetric label="Summons" value={latest.entityCounts["player-summon"]} />
+            <DecisionMetric label="Itens" value={latest.entityCounts.item ?? 0} />
+            <DecisionMetric label="Efeitos" value={latest.entityCounts.effect ?? 0} />
+            <DecisionMetric label="Mísseis" value={latest.entityCounts.missile ?? 0} />
             <DecisionMetric label="Desconhecidos" value={latest.entityCounts.unknown} />
             <DecisionMetric label="Confiança visual" value={latest.perceptionConfidence === null ? "—" : `${Math.round(latest.perceptionConfidence * 100)}%`} />
           </div>
@@ -452,6 +455,9 @@ function entityColor(kind: string): string {
   if (kind === "creature") return "#ef4444";
   if (kind === "npc") return "#eab308";
   if (kind === "player-summon") return "#3b82f6";
+  if (kind === "item") return "#f97316";
+  if (kind === "effect") return "#14b8a6";
+  if (kind === "missile") return "#ec4899";
   return "#a855f7";
 }
 

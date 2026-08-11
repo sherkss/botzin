@@ -19,6 +19,7 @@ export interface RuntimeConfig {
   readonly obsProcessName: string;
   readonly tibiaProcessName: string;
   readonly tibiaSourceName: string;
+  readonly obsCaptureWidth: number;
   readonly detector: DetectorKind;
   readonly onnxModelPath: string;
   readonly onnxLabelsPath: string;

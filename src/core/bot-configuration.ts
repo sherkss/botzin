@@ -41,6 +41,8 @@ export interface MachineRuntimeConfig {
   readonly obsProcessName: string;
   readonly tibiaProcessName: string;
   readonly tibiaSourceName: string;
+  /** Width (px) of the OBS capture used for detection; height follows the source aspect. */
+  readonly obsCaptureWidth: number;
   readonly detector: "mock" | "onnx";
   readonly onnxModelPath: string;
   readonly onnxLabelsPath: string;

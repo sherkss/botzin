@@ -45,6 +45,8 @@ interface Options {
   readonly visualBatchSize: number;
   readonly visualConcurrency: number;
   readonly force: boolean;
+  readonly skipPrepared: boolean;
+  readonly hwaccel: string;
   readonly pythonCommand: string;
 }
 
@@ -88,9 +90,23 @@ async function main(): Promise<void> {
         options.analyzeLocal && !options.force ? options.limit + completedVideoIds.size : options.limit
       )
       : await loadExistingVideoSources(join(options.knowledgeRoot, "raw"));
+  // Without this, a bulk run over every queued source re-downloads everything that
+  // was already prepared, because the analysis-based skip only applies to
+  // --analyze-local. It makes a long run resumable after an interruption.
+  //
+  // Known failures are skipped too. Some are permanent - members-only videos can
+  // never be fetched - and retrying them on every restart consumes the run before it
+  // reaches new material. Retrying them is what --retry-failed is for.
+  const alreadyAttempted = new Set([
+    ...dataset.listVideos().map((video) => video.videoId),
+    ...dataset.listFailures().map((failure) => failure.videoId),
+  ]);
+  const notYetPrepared = options.skipPrepared && !options.retryFailed
+    ? discoveredEntries.filter((entry) => !entry.id || !alreadyAttempted.has(entry.id))
+    : discoveredEntries;
   const entries = options.analyzeLocal && !options.force && !options.retryFailed
-    ? discoveredEntries.filter((entry) => !entry.id || !completedVideoIds.has(entry.id)).slice(0, options.limit)
-    : discoveredEntries.slice(0, options.limit);
+    ? notYetPrepared.filter((entry) => !entry.id || !completedVideoIds.has(entry.id)).slice(0, options.limit)
+    : notYetPrepared.slice(0, options.limit);
 
   if (entries.length === 0) {
     console.log(options.retryFailed ? "[visual] A fila de falhas está vazia." : "[visual] Nenhum vídeo novo para processar.");
@@ -173,11 +189,27 @@ async function prepareVideo(
   const videoPath = join(videoDirectory, videoName);
   const info = JSON.parse(await readFile(join(videoDirectory, infoName), "utf8")) as VideoInfo;
 
-  await run("ffmpeg", [
-    "-hide_banner", "-loglevel", "error", "-y", "-i", videoPath,
+  // Extracting one frame per interval still decodes every frame of the video, which
+  // is the slowest part of preparing a video. Offloading the decode to the GPU cut a
+  // 33-minute 720p AV1 video from 308s to 178s on this machine, with byte-identical
+  // output. Not every codec or driver accepts it, so a failure falls back to
+  // software rather than losing the video.
+  const frameArgs = (accel: readonly string[]) => [
+    "-hide_banner", "-loglevel", "error", "-y", ...accel, "-i", videoPath,
+    "-an",
     "-vf", `fps=1/${options.frameIntervalSeconds},scale=-2:'min(${options.maxHeight},ih)'`,
     "-q:v", "3", join(framesDirectory, "frame-%06d.jpg")
-  ]);
+  ];
+  if (options.hwaccel === "none") {
+    await run("ffmpeg", frameArgs([]));
+  } else {
+    try {
+      await run("ffmpeg", frameArgs(["-hwaccel", options.hwaccel]));
+    } catch {
+      console.warn(`[visual] Aceleração "${options.hwaccel}" falhou; refazendo por software.`);
+      await run("ffmpeg", frameArgs([]));
+    }
+  }
 
   const frameNames = (await readdir(framesDirectory)).filter((name) => /^frame-\d{6}\.jpg$/i.test(name)).sort();
   if (frameNames.length === 0) throw new Error("O FFmpeg não extraiu quadros do vídeo.");
@@ -229,6 +261,8 @@ function parseOptions(args: readonly string[]): Options {
     visualBatchSize: positiveInteger(valueAfter("--batch-size") ?? process.env.BOTZIN_VISUAL_BATCH_SIZE, 1, "--batch-size"),
     visualConcurrency: positiveInteger(valueAfter("--concurrency") ?? process.env.BOTZIN_VISUAL_CONCURRENCY, 1, "--concurrency"),
     force: args.includes("--force"),
+    skipPrepared: args.includes("--skip-prepared"),
+    hwaccel: valueAfter("--hwaccel") ?? "d3d11va",
     pythonCommand: process.env.BOTZIN_PYTHON_COMMAND ?? "python"
   };
 }

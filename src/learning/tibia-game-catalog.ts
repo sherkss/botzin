@@ -1,6 +1,12 @@
 export interface TibiaCreatureCatalogEntry {
   readonly race: string;
   readonly name: string;
+  /** Wiki taxonomy (Demons, Mammals, The Undead...); present for most creatures. */
+  readonly creatureClass: string | null;
+  /** In-game Bestiary class. Only creatures actually listed in the Bestiary have one. */
+  readonly bestiaryClass: string | null;
+  readonly bestiaryDifficulty: string | null;
+  readonly bestiaryOccurrence: string | null;
   readonly imageUrl: string;
   readonly description: string;
   readonly behaviour: string;
@@ -54,6 +60,13 @@ export interface TibiaItemCatalogEntry {
   readonly wikiUrl: string;
   readonly imagePath: string | null;
   readonly sourceUpdatedAt: string;
+}
+
+export interface TibiaItemImageSource {
+  readonly sourceId: number;
+  readonly name: string;
+  readonly assetId: number;
+  readonly categorySlug: string | null;
 }
 
 interface OfficialCreatureOverviewResponse {
@@ -113,11 +126,54 @@ export async function fetchTibiaItemCatalog(
   return items.sort((left, right) => left.name.localeCompare(right.name));
 }
 
+/**
+ * Sprite sources for the local visual training pipeline. The generated item catalog only
+ * keeps the storage key, while downloading requires the numeric asset id.
+ */
+export async function fetchTibiaItemImageSources(
+  fetchJson: (url: string) => Promise<unknown> = fetchJsonWithRetry,
+  concurrency = 6,
+  limit: number | null = null
+): Promise<readonly TibiaItemImageSource[]> {
+  const first = objectValue(await fetchJson(`${ITEM_API_URL}?page=1&pageSize=100`));
+  const pageSize = positiveNumber(first.pageSize, 100);
+  let totalPages = Math.ceil(nonNegativeNumber(first.totalCount) / pageSize);
+  // A caller that only wants the first N items must not pay for the ~50-request
+  // crawl of the full catalog. Entries without a usable image are filtered out
+  // after paging, so the caller can receive slightly fewer than `limit` items.
+  if (limit !== null) totalPages = Math.min(totalPages, Math.ceil(limit / pageSize));
+  const pageNumbers = Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) => index + 2);
+  const remaining = await concurrentMap(pageNumbers, concurrency, (page) =>
+    fetchJson(`${ITEM_API_URL}?page=${page}&pageSize=${pageSize}`).then(objectValue));
+  return [first, ...remaining].flatMap((page) => parseItemImageSources(page));
+}
+
+export function parseItemImageSources(value: unknown): TibiaItemImageSource[] {
+  return arrayValue(objectValue(value).items).map((raw) => {
+    const item = objectValue(raw);
+    const image = objectValue(item.primaryImage);
+    const assetId = positiveNumber(image.assetId);
+    const sourceId = positiveNumber(item.id);
+    const name = stringValue(item.name);
+    return assetId && sourceId && name ? {
+      sourceId,
+      name: decodeHtml(name),
+      assetId,
+      categorySlug: stringValue(item.categorySlug)
+    } : null;
+  }).filter((entry): entry is TibiaItemImageSource => entry !== null);
+}
+
 export function parseOfficialCreature(value: unknown, fallbackRace: string): TibiaCreatureCatalogEntry {
   const creature = objectValue(value);
   return {
     race: stringValue(creature.race) ?? fallbackRace,
     name: requiredCatalogString(creature.name, `creature ${fallbackRace} name`),
+    // The official endpoint carries no taxonomy; these are filled by enrichCreature.
+    creatureClass: null,
+    bestiaryClass: null,
+    bestiaryDifficulty: null,
+    bestiaryOccurrence: null,
     imageUrl: stringValue(creature.image_url) ?? "",
     description: stringValue(creature.description) ?? "",
     behaviour: stringValue(creature.behaviour) ?? "",
@@ -170,6 +226,10 @@ export function enrichCreature(
   }).filter((drop): drop is TibiaCreatureLootDrop => drop !== null);
   return {
     ...creature,
+    creatureClass: normalizeCreatureClass(stringValue(infobox.creatureClass)),
+    bestiaryClass: normalizeCreatureClass(stringValue(infobox.bestiaryClass)),
+    bestiaryDifficulty: stringValue(infobox.bestiaryDifficulty),
+    bestiaryOccurrence: stringValue(infobox.bestiaryOccurrence),
     armor: nonNegativeNumber(combat.armor),
     mitigation: nonNegativeNumber(combat.mitigation),
     maxDamage: Object.values(damageByType).reduce((sum, damage) => sum + damage, 0),
@@ -181,6 +241,25 @@ export function enrichCreature(
     communitySourceUrl: `${COMMUNITY_CREATURE_API_URL}/${encodeURIComponent(nonNegativeNumber(detail.id) || sourceName)}`,
     communitySourceUpdatedAt: stringValue(detail.lastUpdated)
   };
+}
+
+const CREATURE_CLASS_ALIASES: Readonly<Record<string, string>> = {
+  "the undead": "Undead",
+  "special creatures": "Special"
+};
+
+/**
+ * The wiki spells the same class several ways - "Human" and "Humans", "Special"
+ * and "Special Creatures" - and the Bestiary field arrives lowercased. Without
+ * folding those together the catalog ends up with duplicate categories.
+ */
+export function normalizeCreatureClass(value: string | null): string | null {
+  const cleaned = value?.trim().toLowerCase();
+  if (!cleaned) return null;
+  const alias = CREATURE_CLASS_ALIASES[cleaned];
+  if (alias) return alias;
+  const singular = cleaned.endsWith("s") && !cleaned.endsWith("ss") ? cleaned.slice(0, -1) : cleaned;
+  return singular.replace(/(^|\s)\S/g, (character) => character.toUpperCase());
 }
 
 export function parseCreatureAttacks(abilities: string): readonly TibiaCreatureAttack[] {

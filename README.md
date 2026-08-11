@@ -455,14 +455,52 @@ Authorization: Bearer TOKEN
 
 O checkpoint `batch-status.json` informa total, concluídas, importadas, encontradas no cache e falhas. Uma nova execução retoma na prática pelo cache e tenta novamente somente o que não foi importado. Para uma validação pequena antes do catálogo completo, envie `{"limit":10,"delayMs":750}`.
 
-Depois de concluir a importação, instale o ambiente de treino e gere um detector YOLO/ONNX inicial:
+#### Importar sprites de itens para o dataset
+
+Os itens ensinam a segunda classe do detector (`item`), necessária para reconhecer loot no chão. Baixe o catálogo completo de sprites pela linha de comando:
+
+```powershell
+npm run items:assets
+```
+
+Cada sprite WebP é convertido para PNG com transparência em `storage/knowledge/item-assets/SOURCE_ID/sprite.png`, ao lado de um `manifest.json` com fonte, hash e dimensões. A importação é idempotente: itens já baixados não são consultados de novo. Ajuste `--concurrency` (1 a 8), `--delay-ms`, `--limit` para uma validação pequena, `--categories` para restringir a categorias (por exemplo `--categories runes,potions`) e `--force` para reprocessar o que já existe.
+
+Itens cujo sprite é totalmente transparente são recusados, pois não geram uma caixa de anotação válida. Somente respostas WebP do domínio do catálogo comunitário são aceitas, com limite de 4 MB e verificação de assinatura.
+
+As mesmas operações estão disponíveis pela API, para acompanhar o progresso pela interface:
+
+```http
+POST /api/item-assets/import          {"sourceId":1342}
+POST /api/item-assets/import-all      {"limit":50,"delayMs":120,"concurrency":4}
+GET  /api/item-assets/import-all/status
+```
+
+#### Extrair efeitos e projéteis do client
+
+Efeitos de magia e projéteis não existem em nenhum catálogo público: são desenhados pelo próprio client. Com o client oficial instalado, três passos geram esses assets:
+
+```powershell
+python scripts/parse-appearances.py --assets "<client>/packages/Tibia/assets"
+python scripts/extract-client-sprites.py --assets "<client>/packages/Tibia/assets"
+python scripts/pack-client-effects.py
+```
+
+O primeiro decodifica o `appearances.dat` e separa objects, outfits, effects e missiles. O segundo descompacta os spritesheets em PNG pixel-exato. O terceiro junta os dois em `storage/knowledge/effect-assets/` e `storage/knowledge/missile-assets/`, no mesmo formato `manifest.json` + `frames/` dos demais assets.
+
+Cada projétil rende 8 quadros — as direções de voo da grade 3×3 do client, sem a célula central, que não existe. Cada efeito rende os quadros da sua animação. Sprites em branco são descartados, pois não geram caixa de anotação válida.
+
+Esses arquivos são propriedade da CipSoft: ficam em `storage/` (fora do Git) e servem apenas ao treino local. **Nunca os inclua em commits ou pacotes distribuídos** — para levar o resultado a outra máquina, use `npm run ai:export`, que carrega o modelo treinado e não a arte de origem.
+
+Depois de concluir as importações, instale o ambiente de treino e gere um detector YOLO/ONNX inicial:
 
 ```powershell
 python -m pip install -r requirements-training.txt
 npm run creatures:train -- --epochs 5 --samples-per-class 3 --image-size 320
 ```
 
-O gerador combina os sprites animados com os frames reais disponíveis em `storage/knowledge/visual-training/frames`, desfocando o fundo para que criaturas já presentes e não anotadas não sejam tratadas como exemplos negativos. O resultado é salvo em `models/tibia-creatures.onnx`, com as classes em `models/tibia-creatures.labels.json`. Esse primeiro modelo usa dados sintéticos: valide-o e refine-o com mais recortes reais antes de habilitar decisões automáticas.
+O gerador combina os sprites de criaturas, itens, efeitos e projéteis com os frames reais disponíveis em `storage/knowledge/visual-training/frames`, desfocando o fundo para que criaturas já presentes e não anotadas não sejam tratadas como exemplos negativos. Cada imagem sintética recebe de 2 a 6 criaturas, até `--items-per-sample` itens (padrão 4), `--effects-per-sample` efeitos e `--missiles-per-sample` projéteis (padrão 2 cada), de forma que o modelo aprenda a separar as classes na mesma cena. Cada classe tem sua própria faixa de escala, já que as fontes desenham em tamanhos de tile diferentes. O resultado é salvo em `models/tibia-creatures.onnx`, com as classes em `models/tibia-creatures.labels.json`.
+
+Todos os grupos além de criaturas são opcionais: os ausentes — ou desligados por `--skip-items`, `--skip-effects` e `--skip-missiles` — simplesmente não entram, e os identificadores de classe são renumerados para permanecerem contíguos a partir de zero, como o YOLO exige. Sem nenhum deles, o treino volta ao modelo original de uma única classe. Esse primeiro modelo usa dados sintéticos: valide-o e refine-o com mais recortes reais antes de habilitar decisões automáticas.
 
 ### Migração da IA para outra máquina
 
@@ -632,3 +670,20 @@ Uso recomendado:
 - Nos PCs de percepção, aponte o host coordenador para o IP mais estável, preferencialmente cabo.
 - Se a máquina tiver dois IPs úteis, liste ambos em hosts anunciados.
 - O Raspberry deve ficar na mesma rede local ou receber o IP fixo do coordenador/executor.
+
+## Retomar o treinamento limpo em outra máquina
+
+O pacote `training-bundles/entity-training-clean-epoch7.tar` é armazenado com Git LFS. Ele contém o dataset isolado de criaturas, NPCs e itens, além dos resultados da execução interrompida na época 7. Os pesos também estão disponíveis em `models/candidates/tibia-entities-clean-epoch7.pt`.
+
+Depois de clonar o repositório na nova máquina:
+
+```powershell
+git lfs install
+git lfs pull
+New-Item -ItemType Directory -Force storage\knowledge | Out-Null
+tar -xf training-bundles\entity-training-clean-epoch7.tar -C storage\knowledge
+python -m pip install ultralytics pyyaml pillow
+npm run entities:resume:clean -- --device 0 --epochs 100
+```
+
+Use `--device cpu` se a máquina não tiver uma GPU CUDA. O script confere os manifests e a quantidade de imagens/labels, recria o `data.yaml` com o caminho da máquina atual e exporta o melhor resultado para `models/candidates/tibia-entities-clean-resumed.onnx`.

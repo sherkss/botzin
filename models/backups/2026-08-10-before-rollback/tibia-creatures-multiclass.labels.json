@@ -1,0 +1,22 @@
+[
+  {
+    "id": 0,
+    "kind": "creature",
+    "label": "creature"
+  },
+  {
+    "id": 1,
+    "kind": "item",
+    "label": "item"
+  },
+  {
+    "id": 2,
+    "kind": "effect",
+    "label": "effect"
+  },
+  {
+    "id": 3,
+    "kind": "missile",
+    "label": "missile"
+  }
+]

@@ -22,9 +22,11 @@ export class ObsPreviewFrameSource implements FrameSource {
   }
 
   async captureFrame(): Promise<ScreenFrame> {
-    // The detector consumes a 320x320 letterboxed tensor. Asking OBS for a
-    // full-resolution PNG wastes network, decode and resize time on every cycle.
-    return this.captureScreenshot("jpg", 70, this.config.onnxInputWidth);
+    // The detector letterboxes whatever arrives down to its input size, so the
+    // capture width only needs enough detail for the second-stage species
+    // classifier's creature crops. Asking OBS for a full-resolution PNG would
+    // waste network, decode and resize time on every cycle.
+    return this.captureScreenshot("jpg", 72, this.config.obsCaptureWidth);
   }
 
   async capturePreviewFrame(): Promise<ScreenFrame> {

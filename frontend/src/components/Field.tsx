@@ -4,21 +4,24 @@ interface FieldProps {
   label: string;
   children: ReactNode;
   className?: string;
+  hint?: string;
+  required?: boolean;
 }
 
-export function Field({ label, children, className = "" }: FieldProps) {
+export function Field({ label, children, className = "", hint, required }: FieldProps) {
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
       <label className="text-[11px] font-medium uppercase tracking-[0.04em] text-muted">
-        {label}
+        {label}{required && <span className="ml-1 text-red-300" aria-hidden="true">*</span>}
       </label>
       {children}
+      {hint && <span className="text-[11px] text-subtle">{hint}</span>}
     </div>
   );
 }
 
 const inputBase =
-  "w-full rounded-[6px] border border-border bg-bg px-2.5 py-[7px] text-[13px] text-text placeholder:text-subtle focus:border-link focus:outline-none focus:ring-[3px] focus:ring-link/15 transition-[border-color,box-shadow] duration-[120ms] appearance-none";
+  "w-full rounded-[8px] border border-border bg-bg px-3 py-2.5 text-[13px] text-text placeholder:text-subtle focus:border-link focus:outline-none focus:ring-[3px] focus:ring-link/15 transition-[border-color,box-shadow] duration-[120ms] appearance-none";
 
 export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={`${inputBase} ${props.className ?? ""}`} />;

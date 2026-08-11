@@ -6,6 +6,7 @@ import { createMysqlPool } from "./mysql-pool.js";
 import type { RowDataPacket } from "mysql2/promise";
 import { seedBasicGameKnowledge } from "../learning/basic-game-knowledge.js";
 import { seedTibiaSpells } from "../learning/seed-tibia-spells.js";
+import { seedTibiaHunts } from "../learning/seed-tibia-hunts.js";
 import { seedTibiaGameCatalog } from "../learning/seed-tibia-game-catalog.js";
 import { seedTibiaGeneralKnowledge } from "../learning/seed-tibia-general-knowledge.js";
 
@@ -128,6 +129,7 @@ async function main(): Promise<void> {
 
   await seedBasicGameKnowledge(pool);
   await seedTibiaSpells(pool);
+  await seedTibiaHunts(pool);
   await seedTibiaGameCatalog(pool);
   await seedTibiaGeneralKnowledge(pool);
 

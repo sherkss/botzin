@@ -41,7 +41,17 @@ async function enrichExistingCreatures(): Promise<readonly TibiaCreatureCatalogE
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         result[index] = enrichCreature(creature, await response.json(), creature.race);
       } catch {
-        result[index] = { ...creature, armor: 0, mitigation: 0, maxDamage: 0, damageByType: {}, damageModifiers: {}, attacks: [], location: "", lootDetails: [], communitySourceUrl: null, communitySourceUpdatedAt: null };
+        // The existing catalog predates the taxonomy fields, so they are spelled out
+        // here instead of relying on the spread to carry them in as undefined.
+        result[index] = {
+          ...creature,
+          creatureClass: creature.creatureClass ?? null,
+          bestiaryClass: creature.bestiaryClass ?? null,
+          bestiaryDifficulty: creature.bestiaryDifficulty ?? null,
+          bestiaryOccurrence: creature.bestiaryOccurrence ?? null,
+          armor: 0, mitigation: 0, maxDamage: 0, damageByType: {}, damageModifiers: {},
+          attacks: [], location: "", lootDetails: [], communitySourceUrl: null, communitySourceUpdatedAt: null
+        };
       }
     }
   }));

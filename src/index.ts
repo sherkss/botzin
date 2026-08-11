@@ -90,6 +90,9 @@ async function main(): Promise<void> {
       const decision = errorDecision(config.nodeId, strategy.name, error);
       await decisionStore.append(decision);
       console.error(JSON.stringify({ type: "live-decision-error", observedAt: decision.observedAt, error: decision.error }));
+      // Keep connection failures from spinning thousands of times per second
+      // while OBS or a remote machine is unavailable.
+      await delay(1_000);
     }
     await yieldToEventLoop();
   }
@@ -99,6 +102,10 @@ async function main(): Promise<void> {
 
 async function yieldToEventLoop(): Promise<void> {
   await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+}
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
 
 main().catch((error: unknown) => {

@@ -1,4 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from "react";
+import { AlertCircle, CheckCircle2, LoaderCircle } from "lucide-react";
+import { Button } from "./ui.tsx";
 import { apiPost, apiUpload, buildPayload } from "../api.ts";
 
 interface UseFormOptions {
@@ -50,24 +52,24 @@ export function FormBody({ onSubmit, busy, msg, submitLabel, children }: FormPro
       {children}
 
       {msg && (
-        <p
-          className={`rounded-[6px] border px-3 py-1.5 text-[12px] ${
+        <p role={isError ? "alert" : "status"}
+          className={`flex items-center gap-2 rounded-[8px] border px-3 py-2.5 text-[12px] ${
             isError
               ? "border-[#f8514933] bg-[#f8514910] text-[#f85149]"
               : "border-[#3fb95033] bg-[#3fb95010] text-[#3fb950]"
           }`}
         >
-          {msg}
+          {isError ? <AlertCircle size={15} /> : <CheckCircle2 size={15} />}{msg}
         </p>
       )}
 
-      <button
+      <Button
         type="submit"
         disabled={busy}
-        className="rounded-[6px] border border-white/10 bg-accent px-4 py-1.5 text-[12px] font-medium text-white transition-colors duration-[120ms] hover:bg-accent-hover disabled:opacity-60"
+        variant="primary"
       >
-        {busy ? "Salvando..." : submitLabel}
-      </button>
+        {busy && <LoaderCircle className="animate-spin" size={15} />}{busy ? "Salvando..." : submitLabel}
+      </Button>
     </form>
   );
 }

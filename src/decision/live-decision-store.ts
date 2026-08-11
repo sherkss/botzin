@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { PerceptionEvent } from "../coordination/perception-event.js";
@@ -33,6 +33,9 @@ const EMPTY_COUNTS: Readonly<Record<GameEntityKind, number>> = {
   creature: 0,
   npc: 0,
   "player-summon": 0,
+  item: 0,
+  effect: 0,
+  missile: 0,
   unknown: 0
 };
 
@@ -42,7 +45,9 @@ export function decisionFrom(
   commands: readonly InputCommand[]
 ): LiveDecisionRecord {
   const entityCounts = { ...EMPTY_COUNTS };
-  for (const entity of event.entities) entityCounts[entity.kind] += 1;
+  // Entities can carry a kind from an out-of-date labels file; counting it under
+  // a dynamic key would produce NaN (undefined + 1) in every persisted record.
+  for (const entity of event.entities) entityCounts[entity.kind in entityCounts ? entity.kind : "unknown"] += 1;
   const confidence = event.entities.length > 0
     ? event.entities.reduce((sum, entity) => sum + entity.confidence, 0) / event.entities.length
     : null;
@@ -137,9 +142,36 @@ export class LiveDecisionStore {
   private async compact(): Promise<void> {
     const records = (await this.listLatest(this.retainedRecords)).reverse();
     const temporaryPath = `${this.path}.tmp`;
-    await writeFile(temporaryPath, records.map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
-    await rename(temporaryPath, this.path);
+    const contents = records.map((record) => JSON.stringify(record)).join("\n") + "\n";
+    await writeFile(temporaryPath, contents, "utf8");
+    try {
+      // Windows can reject replacing the file while the web panel is reading it.
+      // Readers are short polls, so a brief retry usually recovers the atomic
+      // rename; only after that fall back to an in-place rewrite, which risks a
+      // torn concurrent read but keeps the monitor alive.
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          await rename(temporaryPath, this.path);
+          return;
+        } catch (error) {
+          if (!isWindowsReplaceError(error)) throw error;
+          if (attempt >= 3) break;
+          await wait(50 * (attempt + 1));
+        }
+      }
+      await writeFile(this.path, contents, "utf8");
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined);
+    }
   }
+}
+
+function isWindowsReplaceError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EACCES");
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
 
 function clampLimit(limit: number): number {

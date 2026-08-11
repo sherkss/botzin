@@ -1,9 +1,19 @@
-export type GameEntityKind =
-  | "player"
-  | "creature"
-  | "npc"
-  | "player-summon"
-  | "unknown";
+export const GAME_ENTITY_KINDS = [
+  "player",
+  "creature",
+  "npc",
+  "player-summon",
+  "item",
+  "effect",
+  "missile",
+  "unknown"
+] as const;
+
+export type GameEntityKind = (typeof GAME_ENTITY_KINDS)[number];
+
+export function isGameEntityKind(value: unknown): value is GameEntityKind {
+  return typeof value === "string" && (GAME_ENTITY_KINDS as readonly string[]).includes(value);
+}
 
 export interface BoundingBox {
   readonly x: number;

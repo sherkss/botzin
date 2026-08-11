@@ -2,6 +2,7 @@ import { CollapsibleCard } from "../components/CollapsibleCard.tsx";
 import { useState } from "react";
 import { Field, GroupLabel, Input, Select, Textarea } from "../components/Field.tsx";
 import { FormBody, useFormSubmit } from "../components/FormSection.tsx";
+import { SpellIconGrid } from "../components/SpellIconGrid.tsx";
 import type { AppState } from "../types.ts";
 
 interface Props {
@@ -22,6 +23,9 @@ export function EntitiesSection({ state, onRefresh }: Props) {
         <HuntCard onRefresh={onRefresh} />
         <SkillCard onRefresh={onRefresh} />
         <ClientSpellBindingCard state={state} onRefresh={onRefresh} />
+        <CollapsibleCard icon="✨" iconKind="skill" title="Ícones das magias" defaultOpen={false} wide>
+          <SpellIconGrid />
+        </CollapsibleCard>
       </div>
     </section>
   );

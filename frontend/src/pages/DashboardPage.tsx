@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { Activity, BookOpen, Bot, CircleAlert, Database, Monitor, Play, RefreshCw, Route, Sparkles, UsersRound, Video } from "lucide-react";
 import { apiFetch } from "../api.ts";
 import type { AppState, Assignment } from "../types.ts";
+import { Badge, Button, EmptyState, PageHeader, SectionHeader } from "../components/ui.tsx";
 
 interface Props {
   state: AppState;
@@ -12,7 +14,7 @@ interface StatCard {
   label: string;
   value: number;
   color: string;
-  icon: React.ReactNode;
+  icon: React.ElementType;
 }
 
 export function DashboardPage({ state, statusMsg, onRefresh }: Props) {
@@ -23,101 +25,76 @@ export function DashboardPage({ state, statusMsg, onRefresh }: Props) {
       label: "Contas",
       value: state.accounts.length,
       color: "text-icon-account",
-      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+      icon: UsersRound,
     },
     {
       label: "Chars",
       value: state.characters.length,
       color: "text-icon-char",
-      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+      icon: Bot,
     },
     {
       label: "Maquinas",
       value: state.machines.length,
       color: "text-icon-machine",
-      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>,
+      icon: Monitor,
     },
     {
       label: "Hunts",
       value: state.hunts.length,
       color: "text-icon-hunt",
-      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>,
+      icon: Route,
     },
     {
       label: "Skills",
       value: state.skills.length,
       color: "text-icon-skill",
-      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>,
+      icon: Sparkles,
     },
     {
       label: "Atribuicoes ativas",
       value: activeAssignments.length,
       color: "text-icon-assign",
-      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
+      icon: Activity,
     },
     {
       label: "Metodos de aprendizado",
       value: state.learningMethods.length,
       color: "text-icon-method",
-      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>,
+      icon: BookOpen,
     },
     {
       label: "Fontes de ensino",
       value: state.learningSources.length,
       color: "text-icon-source",
-      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
+      icon: Database,
     },
   ];
 
   return (
     <div className="flex flex-1 flex-col">
-      {/* Header */}
-      <div className="border-b border-border px-6 py-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-[18px] font-semibold">Dashboard</h1>
-            <p className="mt-0.5 text-[13px] text-muted">{statusMsg || "Visao geral em tempo real"}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onRefresh}
-            className="flex items-center gap-2 rounded-[6px] border border-border px-4 py-2 text-[12px] font-medium text-muted transition-colors duration-[120ms] hover:border-border-2 hover:bg-surface-3 hover:text-text"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
-              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>
-            </svg>
-            Atualizar
-          </button>
-        </div>
-      </div>
+      <PageHeader eyebrow="Visão geral" title="Dashboard operacional" description={statusMsg || "Acompanhe a saúde, capacidade e atividade do sistema em tempo real."} actions={<Button onClick={onRefresh}><RefreshCw size={15} />Atualizar dados</Button>} />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Stats grid */}
-        <div>
-          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Resumo</h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {stats.map(s => (
-              <div key={s.label} className="rounded-[10px] border border-border bg-surface p-4">
-                <div className={`mb-2 ${s.color}`}>{s.icon}</div>
-                <div className="text-[26px] font-bold leading-none">{s.value}</div>
-                <div className="mt-1 text-[12px] text-muted">{s.label}</div>
-              </div>
-            ))}
+        <div className="dashboard-overview">
+          <div className="primary-kpi">
+            <div className="primary-kpi__top"><span>Operações ativas</span><Badge tone={activeAssignments.length ? "success" : "neutral"}>{activeAssignments.length ? "Em execução" : "Aguardando"}</Badge></div>
+            <strong>{activeAssignments.length}</strong><p>de {state.assignments.length} atribuições configuradas</p>
+            <div className="progress-track"><span style={{ width: `${state.assignments.length && activeAssignments.length ? Math.max(6, activeAssignments.length / state.assignments.length * 100) : 0}%` }} /></div>
+          </div>
+          <div className="compact-stats">
+            {stats.filter(s => s.label !== "Atribuicoes ativas").map(s => { const Icon = s.icon; return <div key={s.label} className="compact-stat"><span className={s.color}><Icon size={17} /></span><div><strong>{s.value}</strong><small>{s.label}</small></div></div>; })}
           </div>
         </div>
 
         {/* Active assignments */}
         <div>
-          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
-            Atribuicoes ativas
-          </h2>
+          <SectionHeader title="Atribuições ativas" description="Execuções prioritárias e seus recursos vinculados" />
           {activeAssignments.length === 0 ? (
-            <div className="rounded-[10px] border border-border bg-surface px-4 py-8 text-center text-[13px] text-subtle">
-              Nenhuma atribuicao ativa no momento.
-            </div>
+            <EmptyState title="Nenhuma atribuição ativa" description="Ative uma atribuição em Operações para começar a acompanhar sua execução aqui." />
           ) : (
-            <div className="overflow-hidden rounded-[10px] border border-border bg-surface">
+            <div className="overflow-x-auto rounded-[12px] border border-border bg-surface">
               <table className="w-full text-[13px]">
                 <thead>
                   <tr className="border-b border-border bg-surface-2">
@@ -224,9 +201,7 @@ function ObsPreviewPanel() {
             </>
           ) : (
             <>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
+              <Play size={13} />
               Iniciar preview
             </>
           )}
@@ -237,10 +212,7 @@ function ObsPreviewPanel() {
         {!enabled && !error && (
           <div className="flex h-64 items-center justify-center">
             <div className="text-center">
-              <svg className="mx-auto mb-3 text-subtle" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M15 10l4.553-2.276A1 1 0 0 1 21 8.723v6.554a1 1 0 0 1-1.447.894L15 14"/>
-                <rect x="1" y="6" width="15" height="12" rx="2"/>
-              </svg>
+              <Video className="mx-auto mb-3 text-subtle" size={40} strokeWidth={1.25} />
               <p className="text-[13px] text-muted">Clique em &ldquo;Iniciar preview&rdquo; para ver a tela do OBS</p>
               <p className="mt-1 text-[11px] text-subtle">Atualiza a cada 2 segundos via OBS WebSocket</p>
             </div>
@@ -250,9 +222,7 @@ function ObsPreviewPanel() {
         {error && (
           <div className="flex h-64 items-center justify-center">
             <div className="text-center">
-              <svg className="mx-auto mb-3 text-[#f85149]" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-              </svg>
+              <CircleAlert className="mx-auto mb-3 text-[#f87171]" size={36} strokeWidth={1.5} />
               <p className="text-[13px] text-muted">OBS nao disponivel</p>
               <p className="mt-1 text-[11px] text-subtle">Verifique se o OBS esta aberto e o WebSocket configurado</p>
               <button

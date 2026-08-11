@@ -13,6 +13,10 @@ export const DEFAULT_MACHINE_RUNTIME_CONFIG: MachineRuntimeConfig = {
   obsProcessName: "obs64.exe",
   tibiaProcessName: "client.exe",
   tibiaSourceName: "Tibia",
+  // 2x the 320px detector input: the detector letterboxes down to 320 anyway,
+  // while the species classifier crops creature patches from the same frame and
+  // benefits from the extra detail.
+  obsCaptureWidth: 640,
   detector: "mock",
   onnxModelPath: "models/tibia-creatures.onnx",
   onnxLabelsPath: "models/tibia-creatures.labels.json",

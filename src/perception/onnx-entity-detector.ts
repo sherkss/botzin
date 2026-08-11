@@ -4,9 +4,11 @@ import { randomUUID } from "node:crypto";
 import * as ort from "onnxruntime-node";
 import sharp from "sharp";
 import type { RuntimeConfig } from "../config/runtime-config.js";
+import { isGameEntityKind } from "../core/game-entity.js";
 import type { BoundingBox, GameEntity, GameEntityKind } from "../core/game-entity.js";
 import type { ScreenFrame } from "../core/frame.js";
 import type { EntityDetector } from "./entity-detector.js";
+import { CreatureSpeciesClassifier } from "./creature-species-classifier.js";
 
 interface ModelLabel {
   readonly id: number;
@@ -35,6 +37,7 @@ export class OnnxEntityDetector implements EntityDetector {
   readonly name = "onnx-local-vision";
   private sessionPromise: Promise<ort.InferenceSession> | null = null;
   private labelsPromise: Promise<readonly ModelLabel[]> | null = null;
+  private readonly creatureClassifier = new CreatureSpeciesClassifier();
 
   constructor(private readonly config: RuntimeConfig) {}
 
@@ -49,7 +52,7 @@ export class OnnxEntityDetector implements EntityDetector {
       throw new Error("ONNX model did not return an output tensor.");
     }
 
-    return this.parseDetections(outputTensor, labels, frame, transform).map((candidate) => ({
+    const entities = this.parseDetections(outputTensor, labels, frame, transform).map((candidate) => ({
       id: randomUUID(),
       kind: candidate.kind,
       confidence: candidate.confidence,
@@ -58,6 +61,7 @@ export class OnnxEntityDetector implements EntityDetector {
       sourceComputerId: frame.sourceComputerId,
       observedAt: new Date().toISOString()
     }));
+    return this.creatureClassifier.identify(frame, entities);
   }
 
   private getSession(): Promise<ort.InferenceSession> {
@@ -83,8 +87,27 @@ export class OnnxEntityDetector implements EntityDetector {
     const raw = await readFile(labelsPath, "utf8").catch(() => {
       throw new Error(`ONNX labels not found at "${labelsPath}". Create a labels JSON file matching the model classes.`);
     });
-    const parsed = JSON.parse(raw) as ModelLabel[];
-    return parsed;
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      throw new Error(`ONNX labels file "${labelsPath}" must contain a JSON array of {id, kind, label} entries.`);
+    }
+    return parsed.map((entry): ModelLabel => {
+      const record = entry as { id?: unknown; kind?: unknown; label?: unknown };
+      if (typeof record.id !== "number" || typeof record.label !== "string") {
+        throw new Error(`ONNX labels file "${labelsPath}" has an entry without a numeric "id" and string "label".`);
+      }
+      if (!isGameEntityKind(record.kind)) {
+        // A labels file from an older training run can carry per-species class
+        // names; degrading to "unknown" keeps detection running instead of
+        // corrupting every consumer that switches on the kind.
+        console.warn(
+          `[onnx-entity-detector] labels file "${labelsPath}" maps class ${record.id} ("${record.label}") ` +
+          `to invalid kind "${String(record.kind)}"; treating it as "unknown". Retrain to regenerate the labels file.`
+        );
+        return { id: record.id, kind: "unknown", label: record.label };
+      }
+      return { id: record.id, kind: record.kind, label: record.label };
+    });
   }
 
   private async prepareInput(frame: ScreenFrame): Promise<{ tensor: ort.Tensor; transform: LetterboxTransform }> {

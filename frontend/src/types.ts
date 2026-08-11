@@ -308,7 +308,7 @@ export interface LiveDecisionRecord {
   frame?: { id: string; width: number; height: number } | null;
   entities?: Array<{
     id: string;
-    kind: "player" | "creature" | "npc" | "player-summon" | "unknown";
+    kind: "player" | "creature" | "npc" | "player-summon" | "item" | "effect" | "missile" | "unknown";
     confidence: number;
     label?: string;
     box: { x: number; y: number; width: number; height: number };
@@ -318,6 +318,9 @@ export interface LiveDecisionRecord {
     creature: number;
     npc: number;
     "player-summon": number;
+    item: number;
+    effect: number;
+    missile: number;
     unknown: number;
   };
   commands: Array<{ id: string; type: string }>;

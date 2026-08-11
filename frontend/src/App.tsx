@@ -16,6 +16,7 @@ export function App() {
   const { user, checked, login, logout, checkSession } = useAuth();
   const { state, statusMsg, refresh } = useAppState();
   const [currentPage, setCurrentPage] = useState<PageId>("dashboard");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     checkSession().then(u => { if (u) refresh(); });
@@ -37,7 +38,7 @@ export function App() {
   if (!user) {
     return (
       <div className="flex h-screen flex-col bg-bg">
-        <TopBar user={null} onRefresh={() => {}} onLogout={() => {}} />
+        <TopBar user={null} onRefresh={() => {}} />
         <LoginPanel onLogin={handleLogin} />
       </div>
     );
@@ -61,13 +62,12 @@ export function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-bg">
-      <TopBar user={user} onRefresh={refresh} onLogout={logout} />
-
+    <div className="app-shell">
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
+        <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} user={user} onLogout={logout} />
 
         <main className="flex flex-1 flex-col overflow-hidden">
+          <TopBar user={user} onRefresh={refresh} currentPage={currentPage} onMenu={() => setMobileMenuOpen(true)} />
           <div className="flex flex-1 overflow-hidden">
             {renderPage()}
           </div>
