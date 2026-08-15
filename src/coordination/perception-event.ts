@@ -1,4 +1,5 @@
 import type { GameEntity } from "../core/game-entity.js";
+import type { CharacterOperationObservation } from "../decision/hunt-operation-policy.js";
 
 export interface PerceptionEvent {
   readonly id: string;
@@ -11,4 +12,5 @@ export interface PerceptionEvent {
     readonly height: number;
   };
   readonly entities: readonly GameEntity[];
+  readonly operationObservation?: CharacterOperationObservation;
 }

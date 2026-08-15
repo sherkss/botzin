@@ -1,7 +1,15 @@
+export interface VitalObservation {
+  readonly current: number;
+  readonly max: number;
+}
+
 export interface CharacterOperationObservation {
   readonly staminaMinutes: number | null;
   readonly capacity: number | null;
   readonly supplies: Readonly<Record<string, number>>;
+  /** Absent while the screen reader still cannot see the health bar. */
+  readonly health?: VitalObservation | null;
+  readonly mana?: VitalObservation | null;
 }
 
 export interface RefillSupplyRule {

@@ -42,7 +42,9 @@ const EMPTY_COUNTS: Readonly<Record<GameEntityKind, number>> = {
 export function decisionFrom(
   event: PerceptionEvent,
   strategy: string,
-  commands: readonly InputCommand[]
+  commands: readonly InputCommand[],
+  /** Filled by rule based strategies so every record explains its own decision. */
+  detail?: { readonly decision?: string; readonly reasons?: readonly string[] }
 ): LiveDecisionRecord {
   const entityCounts = { ...EMPTY_COUNTS };
   // Entities can carry a kind from an out-of-date labels file; counting it under
@@ -59,10 +61,10 @@ export function decisionFrom(
     strategy,
     mode: hasCommands ? "suggest" : "observe",
     status: hasCommands ? "suggested" : "observed",
-    decision: hasCommands ? commands.map((command) => command.type).join(", ") : "Nenhuma ação",
-    reasons: hasCommands
+    decision: detail?.decision ?? (hasCommands ? commands.map((command) => command.type).join(", ") : "Nenhuma ação"),
+    reasons: detail?.reasons ?? (hasCommands
       ? ["A estratégia produziu comandos candidatos.", "Execução automática não está conectada a este monitor."]
-      : ["Estratégia passiva em modo de observação.", "Nenhum comando foi produzido neste ciclo."],
+      : ["Estratégia passiva em modo de observação.", "Nenhum comando foi produzido neste ciclo."]),
     perceptionConfidence: confidence,
     frame: event.frame,
     entities: event.entities,

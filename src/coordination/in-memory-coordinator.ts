@@ -14,7 +14,8 @@ export class InMemoryCoordinator {
       receivedAt: new Date().toISOString(),
       capturedAt: result.capturedAt,
       frame: { id: result.frame.id, width: result.frame.width, height: result.frame.height },
-      entities: result.entities
+      entities: result.entities,
+      operationObservation: result.operationObservation
     };
 
     this.events.push(event);

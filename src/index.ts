@@ -1,7 +1,7 @@
 import { loadRuntimeConfig } from "./config/runtime-config.js";
 import { applyMachineRuntimeConfig } from "./config/machine-runtime-config.js";
 import { InMemoryCoordinator } from "./coordination/in-memory-coordinator.js";
-import { PassiveObservationStrategy } from "./decision/passive-observation-strategy.js";
+import { RuleEngineStrategy, loadoutFromSnapshot } from "./decision/rule-engine-strategy.js";
 import { isEnvironmentReady } from "./environment/check-status.js";
 import { ObsShareInspector } from "./environment/obs-share-inspector.js";
 import { RuntimeEnvironmentChecker } from "./environment/runtime-environment-checker.js";
@@ -11,6 +11,7 @@ import { NetworkProfileBuilder } from "./networking/network-profile-builder.js";
 import { createEntityDetector } from "./perception/detector-factory.js";
 import { createFrameSource } from "./perception/frame-source-factory.js";
 import { PerceptionPipeline } from "./perception/perception-pipeline.js";
+import { CreatureSpeciesClassifier } from "./perception/creature-species-classifier.js";
 import { resolve } from "node:path";
 import { LiveDecisionStore, decisionFrom, errorDecision } from "./decision/live-decision-store.js";
 import { createMysqlPool } from "./database/mysql-pool.js";
@@ -36,9 +37,19 @@ async function main(): Promise<void> {
   );
   const frameSource = createFrameSource(config);
   const detector = createEntityDetector(config);
-  const pipeline = new PerceptionPipeline(frameSource, detector);
+  // The classifier names each creature so the rules can look it up in the
+  // catalog; it turns itself off when no model file is installed.
+  const pipeline = new PerceptionPipeline(frameSource, detector, new CreatureSpeciesClassifier());
   const coordinator = new InMemoryCoordinator();
-  const strategy = new PassiveObservationStrategy();
+  // ponytail: the loadout is read once at startup; restart the bot after
+  // changing the assignment, spells, hotkeys or the run snapshot in the panel.
+  const activeRun = await repository.findActiveCharacterRun(config.nodeId);
+  const loadout = loadoutFromSnapshot(await repository.getSnapshot(), storedMachine.machine.id, activeRun?.routeSnapshotJson ?? null);
+  const strategy = new RuleEngineStrategy(loadout, {
+    targetComputerId: config.nodeId,
+    mode: config.decisionMode,
+    modes: config.decisionRuleModes
+  });
   const decisionStore = new LiveDecisionStore(resolve(config.decisionLogPath));
   const runCollector = new RuntimeRunCollector(
     repository, config.nodeId, resolve(config.runCaptureDir), config.runFrameIntervalMs
@@ -57,6 +68,10 @@ async function main(): Promise<void> {
         frameSource: frameSource.name,
         detector: detector.name,
         strategy: strategy.name,
+        decisionMode: config.decisionMode,
+        character: loadout.character?.name ?? null,
+        hunt: loadout.hunt?.name ?? null,
+        huntSkillRules: loadout.huntSkillRules.length,
         environmentReady: isEnvironmentReady(environment),
         environment,
         captureMode: "continuous-sequential",
@@ -74,7 +89,11 @@ async function main(): Promise<void> {
       const perception = await pipeline.inspectCurrentFrame();
       const event = coordinator.ingest(perception);
       const commands = await strategy.plan(event);
-      const decision = decisionFrom(event, strategy.name, commands);
+      const latest = strategy.lastDecision();
+      const decision = decisionFrom(event, strategy.name, commands, {
+        decision: latest?.decision.accepted?.source,
+        reasons: latest?.decision.reasons
+      });
       await decisionStore.append(decision);
       runCollector.enqueue(perception, decision);
       console.log(JSON.stringify({

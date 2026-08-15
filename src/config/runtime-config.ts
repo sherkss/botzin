@@ -25,6 +25,10 @@ export interface RuntimeConfig {
   readonly onnxLabelsPath: string;
   readonly knowledgeDir: string;
   readonly decisionLogPath: string;
+  /** How far the rule engine may go: observe only, suggest, or send commands. */
+  readonly decisionMode: "observe" | "suggest" | "execute";
+  /** Per rule overrides, so execution is enabled one rule at a time. */
+  readonly decisionRuleModes: Readonly<Record<string, "observe" | "suggest" | "execute">>;
   readonly runCaptureDir: string;
   readonly runFrameIntervalMs: number;
   readonly onnxInputWidth: number;
@@ -55,6 +59,8 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     obsWebSocketPassword: "",
     knowledgeDir: env.BOTZIN_KNOWLEDGE_DIR ?? "storage/knowledge",
     decisionLogPath: env.BOTZIN_DECISION_LOG_PATH ?? "storage/live-decisions.jsonl",
+    decisionMode: env.BOTZIN_DECISION_MODE === "suggest" || env.BOTZIN_DECISION_MODE === "execute" ? env.BOTZIN_DECISION_MODE : "observe",
+    decisionRuleModes: parseRuleModes(env.BOTZIN_DECISION_RULE_MODES),
     runCaptureDir: env.BOTZIN_RUN_CAPTURE_DIR ?? "storage/run-samples",
     webHost: env.BOTZIN_WEB_HOST ?? "127.0.0.1",
     webPort: parsePort(env.BOTZIN_WEB_PORT, 4580),
@@ -69,6 +75,17 @@ export function loadRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runtime
     mysqlPassword: env.BOTZIN_MYSQL_PASSWORD ?? "botzin",
     mysqlDatabase: env.BOTZIN_MYSQL_DATABASE ?? "botzin"
   };
+}
+
+/** Format: `heal:execute,attack-target:suggest`. Unknown modes are ignored. */
+function parseRuleModes(value: string | undefined): Readonly<Record<string, "observe" | "suggest" | "execute">> {
+  const modes: Record<string, "observe" | "suggest" | "execute"> = {};
+  for (const entry of (value ?? "").split(",")) {
+    const [rule, mode] = entry.split(":").map((part) => part.trim());
+    if (!rule || (mode !== "observe" && mode !== "suggest" && mode !== "execute")) continue;
+    modes[rule] = mode;
+  }
+  return modes;
 }
 
 function parsePort(value: string | undefined, fallback: number): number {

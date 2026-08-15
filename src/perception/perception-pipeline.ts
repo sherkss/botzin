@@ -12,12 +12,18 @@ export interface PerceptionResult {
   readonly operationObservation?: CharacterOperationObservation;
 }
 
+/** Adds the species name to each detected creature; a no-op when no model is installed. */
+export interface CreatureIdentifier {
+  identify(frame: ScreenFrame, entities: readonly GameEntity[]): Promise<readonly GameEntity[]>;
+}
+
 export class PerceptionPipeline {
   private nextFrame: Promise<ScreenFrame> | null = null;
 
   constructor(
     private readonly frameSource: FrameSource,
-    private readonly detector: EntityDetector
+    private readonly detector: EntityDetector,
+    private readonly identifier: CreatureIdentifier | null = null
   ) {}
 
   async inspectCurrentFrame(): Promise<PerceptionResult> {
@@ -26,7 +32,10 @@ export class PerceptionPipeline {
     // Capture the next frame while the detector processes this one. Only one
     // frame is prefetched, so stale frames never accumulate in a queue.
     this.nextFrame = this.captureNextFrame();
-    const entities = await this.detector.detect(frame);
+    const detected = await this.detector.detect(frame);
+    // Species names are what the creature rules look up in the catalog; without
+    // them every creature is just "creature" and the knowledge is unusable.
+    const entities = this.identifier ? await this.identifier.identify(frame, detected) : detected;
 
     return {
       sourceComputerId: frame.sourceComputerId,
